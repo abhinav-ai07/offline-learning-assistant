@@ -1,4 +1,5 @@
 from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -16,12 +17,17 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Storage:
     return storage
 
 
-def test_notes_dropped_when_no_syllabus_correlation(store: Storage):
+def test_notes_dropped_when_no_syllabus_correlation(store: Storage, school_session) -> None:
+    school_session(client, store, "teacher", "faculty")
     # Completely off-topic transcript (no maths or NCERT concepts)
     payload = {
         "lines": [
             {"text": "The quick brown fox jumps over the lazy dog.", "start": 0.0, "end": 2.0},
-            {"text": "We went to the grocery store and bought apples and bread.", "start": 2.5, "end": 5.0},
+            {
+                "text": "We went to the grocery store and bought apples and bread.",
+                "start": 2.5,
+                "end": 5.0,
+            },
         ],
         "class_level": 10,
         "subject": "maths",
@@ -31,16 +37,30 @@ def test_notes_dropped_when_no_syllabus_correlation(store: Storage):
     }
     response = client.post("/api/notes", json=payload)
     assert response.status_code == 400
-    assert "No syllabus correlation found" in response.json()["detail"] or "Insufficient syllabus correlation" in response.json()["detail"]
+    detail = response.json()["detail"]
+    assert "No syllabus correlation found" in detail or "Insufficient syllabus correlation" in detail
 
 
-def test_notes_stored_with_mapped_topic_when_correlated(store: Storage):
+def test_notes_stored_with_mapped_topic_when_correlated(store: Storage, school_session) -> None:
+    school_session(client, store, "teacher", "faculty")
     # Correlated transcript discussing Quadratic Equations
     payload = {
         "lines": [
-            {"text": "The standard form of a quadratic equation is ax squared plus bx plus c equals zero.", "start": 0.0, "end": 3.0},
-            {"text": "We calculate the discriminant as b squared minus four ac to find the roots.", "start": 3.5, "end": 7.0},
-            {"text": "If the discriminant is positive, the quadratic equation has two real roots.", "start": 7.5, "end": 11.0},
+            {
+                "text": "The standard form of a quadratic equation is ax squared plus bx plus c equals zero.",
+                "start": 0.0,
+                "end": 3.0,
+            },
+            {
+                "text": "We calculate the discriminant as b squared minus four ac to find the roots.",
+                "start": 3.5,
+                "end": 7.0,
+            },
+            {
+                "text": "If the discriminant is positive, the quadratic equation has two real roots.",
+                "start": 7.5,
+                "end": 11.0,
+            },
         ],
         "class_level": 10,
         "subject": "maths",
@@ -56,12 +76,37 @@ def test_notes_stored_with_mapped_topic_when_correlated(store: Storage):
     assert data["correlation_score"] >= 1.5
     assert "session_id" in data
 
-    # Verify retrieval via GET /api/lecture-notes/4
+    # Draft session notes are not exposed to students until a teacher publishes the lesson.
+    school_session(client, store, "student", "learner")
     retrieval = client.get("/api/lecture-notes/4?class_level=10&subject=maths")
     assert retrieval.status_code == 200
-    ret_data = retrieval.json()
-    assert ret_data["found"] is True
-    assert ret_data["topic"] == "Quadratic Equations"
-    assert ret_data["chapter_number"] == 4
-    assert ret_data["session_id"] == data["session_id"]
-    assert ret_data["markdown"] is not None
+    assert retrieval.json()["found"] is False
+
+    # Once published as a lesson, students can retrieve the chapter notes.
+    school_session(client, store, "teacher", "faculty")
+    created = client.post(
+        "/api/teacher/lessons",
+        json={
+            "title": "Quadratic Equations — Standard Form",
+            "class_level": 10,
+            "section": "A",
+            "subject": "maths",
+            "chapter_number": 4,
+            "chapter_title": "Quadratic Equations",
+            "teaching_date": "2026-11-25",
+            "transcript": " ".join(line["text"] for line in payload["lines"]),
+            "notes_markdown": data["markdown"],
+            "notes_json": data["notes"],
+            "status": "draft",
+        },
+    )
+    assert created.status_code == 200
+    lesson_id = created.json()["lesson_id"]
+    pub = client.post(f"/api/teacher/lessons/{lesson_id}/publish")
+    assert pub.status_code == 200
+
+    school_session(client, store, "student", "learner")
+    published_retrieval = client.get("/api/lecture-notes/4?class_level=10&subject=maths")
+    assert published_retrieval.status_code == 200
+    assert published_retrieval.json()["found"] is True
+    assert published_retrieval.json()["markdown"] == data["markdown"]

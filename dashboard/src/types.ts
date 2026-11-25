@@ -176,6 +176,7 @@ export interface StoredLectureNotesResponse {
 }
 
 export interface TranscribeResponse {
+  audio_path?: string;
   lines: DemoLine[];
   transcript: string;
   duration_s: number;
@@ -423,6 +424,34 @@ export interface TeacherRecentSession {
   duration_s: number | null;
 }
 
+export interface TeacherStudentAttention {
+  full_name: string;
+  student_identifier: string;
+  class_level: number;
+  section: string;
+  score: number;
+  weak_topic: string;
+}
+
+export interface TeacherActivityEvent {
+  id: string;
+  student_id: string;
+  student_name: string;
+  lesson_id: string;
+  lesson_title: string;
+  event_type: string;
+  subject: string;
+  class_level: number;
+  section: string;
+  created_at: string;
+}
+
+export interface TeacherAssignedClass {
+  class_level: number;
+  section: string;
+  subject: string;
+}
+
 export interface TeacherOverview {
   total_sessions: number;
   total_attempts: number;
@@ -430,12 +459,52 @@ export interface TeacherOverview {
   overall_accuracy: number;
   avg_response_ms: number;
   class_mastery_avg: number;
+  class_accuracy: number;
+  /** Count of students below 60% mastery */
+  students_needing_attention: number;
+  /** Detailed list of students below 60% mastery — use this for .map() */
+  students_needing_attention_list: TeacherStudentAttention[];
+  assigned_classes: TeacherAssignedClass[];
+  total_published_lessons: number;
+  lessons_awaiting_review: number;
+  draft_lessons: number;
+  remediation_stats: {
+    total: number;
+    completed: number;
+  };
   topics: TeacherTopic[];
-  recent_sessions: TeacherRecentSession[];
+  recent_sessions?: TeacherRecentSession[];
+  /** Lesson activity log events */
+  recent_activity: TeacherActivityEvent[];
 }
 
 export interface TeacherStudentDetail {
+  lesson_history?: {id:number; lesson_title:string;event_type:string;created_at:string}[];
   student_id: string;
+  student?: {
+    id: string;
+    full_name: string;
+    email: string | null;
+    class_level: number;
+    student_identifier: string;
+    created_at: string;
+  };
+  overall_mastery?: number;
+  overall_accuracy?: number;
+  total_attempts?: number;
+  avg_response_ms?: number;
+  topic_analysis?: {
+    topic: string;
+    attempts: number;
+    correct: number;
+    score: number;
+    updated_at: string;
+    subject: string;
+    subject_label: string;
+    gap_classification: string;
+  }[];
+  strong_topics?: any[];
+  weak_topics?: any[];
   gaps: (Gap & {
     tier?: string;
     tier_label?: string;
@@ -448,11 +517,336 @@ export interface TeacherStudentDetail {
   classifier_model: string;
   mastery: MasteryRow[];
   recent_attempts: {
-    id: string;
+    id: string | number;
     topic: string;
+    prompt?: string;
+    expected?: string;
+    response?: string;
     correct: boolean;
-    difficulty: number;
+    difficulty?: number;
     response_ms: number;
     created_at: string;
+  }[];
+  remediation_packs?: {
+    pack_id: string;
+    topic: string;
+    completed: boolean;
+    score: number;
+    created_at: string;
+  }[];
+}
+
+// ------------------------------------------------------------------ auth types
+export interface AuthUser {
+  id: string;
+  full_name: string;
+  email: string | null;
+  role: "student" | "teacher" | "admin";
+  class_level: number;
+  section?: string;
+  student_identifier: string;
+  created_at: string;
+}
+
+export interface AcademicClass {
+  id: string;
+  class_level: number;
+  name: string;
+  academic_year: string;
+  sections: string[];
+  subjects: SubjectInfo[];
+}
+
+export interface SubjectInfo {
+  id: string;
+  class_level: number;
+  code: string;
+  name: string;
+  icon?: string;
+}
+
+export interface ChapterInfo {
+  id?: string;
+  class_level?: number;
+  subject?: string;
+  chapter_number: number;
+  title: string;
+  description?: string;
+}
+
+export interface TimetableSlot {
+  id: string;
+  class_level: number;
+  section: string;
+  day_of_week: string;
+  period: number;
+  subject: string;
+  teacher_name?: string;
+  time_slot: string;
+}
+
+export type LessonStatus = "draft" | "processing" | "ready_for_review" | "published" | "archived";
+
+export interface KeyConcept {
+  title: string;
+  definition: string;
+}
+
+export interface KeyExample {
+  title?: string;
+  reaction?: string;
+  type?: string;
+  notes?: string;
+}
+
+export interface LessonSummary {
+  id: string;
+  title: string;
+  class_level: number;
+  section: string;
+  subject: string;
+  chapter_number: number;
+  chapter_title: string;
+  teacher_id: string;
+  teacher_name?: string;
+  teaching_date: string;
+  status: LessonStatus;
+  published_at?: string | null;
+  duration_s?: number;
+  has_transcript?: boolean;
+  has_notes?: boolean;
+  completed?: boolean;
+  transcript_viewed?: boolean;
+  notes_viewed?: boolean;
+  quiz_completed?: boolean;
+  quiz_score?: number | null;
+}
+
+export interface LessonCompletion {
+  student_id: string;
+  lesson_id: string;
+  completed: boolean;
+  transcript_viewed: boolean;
+  notes_viewed: boolean;
+  quiz_completed: boolean;
+  quiz_score: number | null;
+}
+
+export interface LessonDetail extends LessonSummary {
+  transcript: string;
+  notes_markdown: string;
+  notes_json?: any;
+  key_concepts: KeyConcept[];
+  examples: KeyExample[];
+  audio_filename?: string | null;
+  audio_path?: string | null;
+  completion?: LessonCompletion;
+}
+
+export interface ChapterTreeItem {
+  chapter_number: number;
+  title: string;
+  description: string;
+  lessons_count: number;
+  completed_count: number;
+  lessons: LessonSummary[];
+}
+
+export interface SubjectTree {
+  subject_code: string;
+  subject_name: string;
+  icon: string;
+  total_lessons: number;
+  completed_lessons: number;
+  progress_pct: number;
+  chapters: ChapterTreeItem[];
+}
+
+export interface AppNotification {
+  id: string;
+  user_id: string;
+  title: string;
+  message: string;
+  type: "lesson_published" | "quiz_assigned" | "reminder" | "system";
+  link: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+export interface ActivityLogItem {
+  id: number;
+  student_id: string;
+  student_name: string;
+  lesson_id: string;
+  lesson_title: string;
+  subject: string;
+  class_level: number;
+  section: string;
+  event_type: string;
+  metadata?: any;
+  created_at: string;
+}
+
+export interface PracticeWorkspaceData {
+  total_quizzes: number;
+  completed_quizzes: number;
+  average_score: number;
+  recent_sessions: any[];
+  recent_attempts: any[];
+  incorrect_attempts: any[];
+  suggested_revision: any[];
+}
+
+export interface TeacherClassOverview {
+  class_level: number;
+  section: string;
+  subject: string;
+  subject_label: string;
+  students_count: number;
+  students: any[];
+  chapters: ChapterInfo[];
+  timetable: TimetableSlot[];
+  lessons: LessonSummary[];
+}
+
+export interface AuthResponse {
+  token: string;
+  user: AuthUser;
+}
+
+// ----------------------------------------------------------- student workspace
+export interface StudentOverview {
+  student_id: string;
+  full_name?: string;
+  email?: string;
+  class_level?: number;
+  total_lectures: number;
+  quiz_attempts: number;
+  overall_accuracy: number;
+  overall_mastery: number;
+  avg_response_ms: number;
+  topics_requiring_revision: {
+    topic: string;
+    score: number;
+    attempts: number;
+    correct: number;
+  }[];
+  recent_activity: {
+    topic: string;
+    prompt: string;
+    correct: boolean;
+    response_ms: number;
+    created_at: string;
+  }[];
+  recommended_next: string;
+}
+
+export interface StudentProgress {
+  student_id: string;
+  full_name?: string;
+  class_level?: number;
+  overall_accuracy: number;
+  total_attempts: number;
+  avg_response_ms: number;
+  topic_mastery: {
+    topic: string;
+    score: number;
+    attempts: number;
+    correct: number;
+    updated_at: string;
+    subject: string;
+    subject_label: string;
+    status: "critical_gap" | "needs_review" | "proficient";
+  }[];
+  strong_topics: any[];
+  weak_topics: any[];
+  recent_trend: {
+    attempt_id: number;
+    topic: string;
+    correct: boolean;
+    response_ms: number;
+    created_at: string;
+  }[];
+  remediation_history: {
+    pack_id: string;
+    topic: string;
+    completed: boolean;
+    score: number;
+    created_at: string;
+  }[];
+}
+
+// ----------------------------------------------------------- teacher workspace
+export interface TeacherStudentItem {
+  id: string;
+  full_name: string;
+  email: string | null;
+  class_level: number;
+  student_identifier: string;
+  created_at: string;
+  is_active: boolean;
+  total_attempts: number;
+  overall_accuracy: number;
+  average_mastery: number;
+  gap_status: "new_student" | "critical_gap" | "needs_review" | "proficient";
+  last_active: string;
+}
+
+export interface TeacherStudentsResponse {
+  students: string[];
+  directory: TeacherStudentItem[];
+}
+
+export interface TeacherGapsAnalytics {
+  total_records: number;
+  critical_gaps: {
+    topic: string;
+    student_id: string;
+    student_name: string;
+    class_level: number;
+    score: number;
+    attempts: number;
+    correct: number;
+    subject: string;
+    subject_label: string;
+    classification: string;
+  }[];
+  needs_review: {
+    topic: string;
+    student_id: string;
+    student_name: string;
+    class_level: number;
+    score: number;
+    attempts: number;
+    correct: number;
+    subject: string;
+    subject_label: string;
+    classification: string;
+  }[];
+  proficient: {
+    topic: string;
+    student_id: string;
+    student_name: string;
+    class_level: number;
+    score: number;
+    attempts: number;
+    correct: number;
+    subject: string;
+    subject_label: string;
+    classification: string;
+  }[];
+}
+
+export interface TeacherImprovementTracking {
+  progression: {
+    date: string;
+    attempts: number;
+    accuracy: number;
+    avg_response_ms: number;
+  }[];
+  topic_masteries: {
+    topic: string;
+    count: number;
+    avg_score: number;
   }[];
 }

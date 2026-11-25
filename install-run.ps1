@@ -125,6 +125,22 @@ if (Test-Path "dashboard\dist\index.html") {
     }
 }
 
+# 5.5. Ensure Initial School Administrator Exists (Interactive Launch)
+$PyExe = if (Test-Path ".venv\Scripts\python.exe") { ".venv\Scripts\python.exe" } else { $PythonCmd }
+$AdminCount = & $PyExe -c "from ila.config import load_settings; from ila.storage import Storage; print(Storage(load_settings().data_dir / 'ila.sqlite3').count_users('admin'))" 2>$null
+if ($LASTEXITCODE -eq 0 -and [int]$AdminCount -eq 0) {
+    if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+        Write-Host "[!] First launch: create the initial School Administrator account." -ForegroundColor Yellow
+        if ($UvCmd) {
+            & $UvCmd run ila create-admin
+        } else {
+            & ".venv\Scripts\ila.exe" create-admin
+        }
+    } else {
+        Write-Host "[!] Note: No administrator account exists yet. Run 'ila create-admin' to provision one." -ForegroundColor Yellow
+    }
+}
+
 # 6. Launch Server & Open Browser
 Write-Host ""
 Write-Host "===============================================================================" -ForegroundColor Cyan

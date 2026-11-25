@@ -38,7 +38,12 @@ class LlamaCppProvider:
 
     def __init__(self, settings: LlmSettings, *, profile: str | None = None) -> None:
         self._settings = settings
-        self._profile = profile or resolve_profile(settings.profile)
+        self._profile = resolve_profile(profile or settings.profile)
+        if (profile or settings.profile) == "auto" and not self.path.is_file():
+            for name, spec in PROFILE_MODELS.items():
+                if (Path(settings.model_dir).expanduser() / spec.filename).is_file():
+                    self._profile = name
+                    break
         self._model: Llama | None = None
         self._lock = threading.Lock()
 
