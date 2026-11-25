@@ -1,5 +1,29 @@
 # Architecture
 
+## School application
+
+All three portals run from the same local FastAPI process and React build. Each portal authenticates a school ID against a bcrypt hash. FastAPI checks the session and role for each protected operation. A local administrator provisions the first administration account using the launcher.
+
+| Portal | Navigation | Data scope |
+| --- | --- | --- |
+| Administration | Overview, Classes, Students, Teachers | School directory, enrollment, assignments and credentials |
+| Teacher | Overview, My Classes, Lesson Studio, Lesson Library, Student Activity, Performance | Assigned rosters and subjects, owned lessons |
+| Student | Overview, My Subjects, Ask ILA, Adaptive Quizzes, My Progress | Personal learning records and published lessons for the enrolled class |
+
+### SQLite and files
+
+The launcher selects `.ila/data/ila.sqlite3`. Users have one of three roles. Authentication sessions reference users. Class level and section name identify a section. Each student enrollment connects a user to one section. Each teaching assignment connects a user to a class, section and subject. Subjects contain numbered chapters. Each lesson records its teacher, class, section, subject, chapter and teaching date.
+
+Lessons progress from draft to review and explicit publication. Published status and time live on the lesson. Publication writes class notifications in the same SQLite transaction. Lesson activity and completion track access, reading and quiz outcomes. A lesson quiz connects its quiz session, lesson and student. Attempts retain the engine's question, topic, answer, difficulty, grading and timing. Mastery retains the existing exponential moving average. Historical learning records can use the earlier school identifier.
+
+Recordings live under `recordings/class_<level>/<subject>/<teacher-id>/`. Published transcript and Markdown revisions live under `transcripts/` and `notes/` by class and subject. The lesson stores the recording path. Its document record stores both revision paths. Existing inline transcripts and notes remain readable. Upgrades use the SQLite backup API to snapshot older databases under `backups/` before applying additive changes. Older tables retain their original keys so legacy data can be opened.
+
+### Daily workflow
+
+The administrator enrolls students and assigns a teacher. The teacher chooses an assignment and chapter, captures a lecture, reviews the transcript, generates local notes and publishes. Students follow a notification or open the lecture through My Subjects. Ask ILA uses classroom material with the available NCERT index. The lesson quiz uses the existing adaptive engine. Reading activity, graded answers and mastery feed the teacher's roster, student history and performance reports.
+
+
+
 ## Goal
 
 A single offline pipeline that turns a lecture into structured study material. The caption event

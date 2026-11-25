@@ -1,5 +1,15 @@
 # Offline Intelligent Lecture Assistant
 
+## School portals
+
+From the sem5 directory, run `python start.py` or open `start.bat`. On the first interactive launch, the application prompts for a school administrator. You can also provision an administrator with `python start.py --create-admin`. The password prompt hides its input. The launcher uses the project's `.ila` directory for its database, recordings and models.
+
+Open [Administration](http://127.0.0.1:8765/admin/login), [Teacher](http://127.0.0.1:8765/teacher/login) or [Student](http://127.0.0.1:8765/student/login). In Administration, use Classes to manage sections, then Students and Teachers to issue credentials and assign classes and subjects. Each portal includes a password change action.
+
+Teachers can save a lesson draft in Lesson Studio and reopen it in the Lesson Library. Publishing stores the reviewed transcript and notes, creates class notifications and makes the dated lecture available in My Subjects. A quiz launched from that lecture uses its transcript and notes. The administration directory and teacher reports use the same SQLite database.
+
+
+
 On-device lecture assistant for **SDG 4 (Quality Education)** — no cloud, no API keys, no internet
 after setup. The repository now covers the full study loop:
 
@@ -111,6 +121,23 @@ Serve the local API and the built React dashboard:
 ```powershell
 ila serve            # http://127.0.0.1:8765  (dashboard, REST, /ws/captions)
 ```
+
+### Teacher Management & Authentication
+
+ILA includes a built-in offline authentication engine with role-based access control (Student vs Teacher):
+
+* **Create Teacher via CLI** (Administrator provisioned):
+  ```powershell
+  ila create-teacher --name "Dr. Rajesh Verma" --id "T-1001" --password "TeacherPass123"
+  ```
+* **Student Accounts**: Students create accounts with their name, roll number, and password. They are assigned to Class 10, Section A by default.
+* **Teacher Accounts**: Teachers sign in with their name, teacher ID, and password. New teachers are provisioned by an administrator.
+* **Local Account Storage**: Accounts and password hashes are stored in `~/.ila/data/ila.sqlite3` (Windows: `%USERPROFILE%\.ila\data\ila.sqlite3`). Set `ILA_HOME` to use another data directory.
+* **Security & Offline Privacy**:
+  * Passwords hashed with `bcrypt` (work factor 12).
+  * Cryptographic session tokens with configurable expiration stored locally in SQLite (`auth_sessions`).
+  * Role authorization guards student privacy: students cannot view teacher analytics or other students' progress.
+  * Teachers have access to the **Teacher Analytics Suite**: classroom knowledge gap taxonomy, ML decision-tree diagnostic tiers, enrolled student directory, and longitudinal progress tracking.
 
 ### Troubleshooting
 
