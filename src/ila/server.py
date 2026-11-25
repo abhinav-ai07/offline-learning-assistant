@@ -44,18 +44,22 @@ import logging
 import re
 import threading
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from fastapi import (
+    Depends,
     FastAPI,
     File,
     Form,
     HTTPException,
+    Request,
+    Response,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -63,6 +67,13 @@ from pydantic import BaseModel, Field
 from ila import __version__, hardware
 from ila.asr import AsrProvider, create_asr
 from ila.audio import FileSource, build_source, list_input_devices
+from ila.auth import (
+    compute_expiration,
+    extract_token,
+    generate_session_token,
+    hash_password,
+    verify_password,
+)
 from ila.config import Settings, load_settings
 from ila.curriculum import (
     CLASS_LEVELS,
@@ -109,10 +120,15 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:4173",
         "http://127.0.0.1:4173",
+        "http://localhost:8765",
+        "http://127.0.0.1:8765",
     ],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 class AsrRegistry:
@@ -213,6 +229,8 @@ class AskRequest(BaseModel):
 
 
 class QuizStartRequest(BaseModel):
+    lesson_id: str | None = None
+    chapter_number: int | None = None
     student_id: str = Field(default="demo-student", min_length=1, max_length=120)
     class_level: int | None = None
     subject: str | None = None
@@ -263,6 +281,85 @@ class SessionRequest(BaseModel):
     markdown: str | None = None
 
 
+class RegisterRequest(BaseModel):
+    full_name: str | None = Field(default=None, max_length=100)
+    email: str | None = Field(default=None, min_length=3, max_length=150)
+    password: str = Field(min_length=6, max_length=100)
+    confirm_password: str | None = Field(default=None, min_length=6, max_length=100)
+    class_level: int = Field(default=10, ge=1, le=12)
+    section: str = Field(default="A", max_length=10)
+    student_identifier: str = Field(min_length=1, max_length=50)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str | None = Field(default=None, min_length=3, max_length=150)
+    full_name: str | None = Field(default=None, min_length=2, max_length=100)
+    identifier: str | None = Field(default=None, min_length=1, max_length=50)
+    role_hint: Literal["student", "teacher", "admin"] | None = None
+    new_password: str = Field(min_length=6, max_length=100)
+    confirm_password: str | None = Field(default=None, min_length=6, max_length=100)
+    student_identifier: str | None = Field(default=None, max_length=50)
+
+
+class LessonCreateRequest(BaseModel):
+    title: str = Field(min_length=2, max_length=200)
+    class_level: int = Field(ge=1, le=12)
+    section: str = Field(default="A", max_length=10)
+    subject: str = Field(min_length=1, max_length=100)
+    chapter_number: int = Field(ge=1)
+    chapter_title: str = Field(min_length=1, max_length=200)
+    teaching_date: str = Field(min_length=8, max_length=30)
+    transcript: str = ""
+    notes_markdown: str = ""
+    notes_json: dict[str, Any] | None = None
+    key_concepts: list[dict[str, Any]] | None = None
+    examples: list[dict[str, Any]] | None = None
+    duration_s: float = 0.0
+    audio_filename: str | None = None
+    audio_path: str | None = None
+    status: str = "draft"
+
+
+class LessonUpdateRequest(BaseModel):
+    title: str | None = None
+    transcript: str | None = None
+    notes_markdown: str | None = None
+    notes_json: dict[str, Any] | None = None
+    key_concepts: list[dict[str, Any]] | None = None
+    examples: list[dict[str, Any]] | None = None
+    status: str | None = None
+    duration_s: float | None = None
+    audio_filename: str | None = None
+    audio_path: str | None = None
+
+
+class LessonActivityRequest(BaseModel):
+    event_type: Literal["opened","transcript_read","notes_read","quiz_started","ask_question","asked_question","concepts_viewed"]
+    metadata: dict[str, Any] | None = None
+
+
+class LessonCompleteRequest(BaseModel):
+    completed: bool = True
+
+
+class LoginRequest(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=100)
+    identifier: str | None = Field(default=None, min_length=1, max_length=50)
+    email_or_username: str | None = Field(default=None, min_length=2, max_length=150)
+    password: str = Field(min_length=1, max_length=100)
+    remember_me: bool = False
+    role_hint: Literal["student", "teacher", "admin"] | None = None
+
+
+class TeacherCreateRequest(BaseModel):
+    full_name: str | None = Field(default=None, max_length=100)
+    teacher_id: str | None = Field(default=None, min_length=1, max_length=50)
+    email: str | None = Field(default=None, min_length=3, max_length=150)
+    password: str = Field(min_length=6, max_length=100)
+    confirm_password: str | None = Field(default=None, min_length=6, max_length=100)
+    class_level: int = Field(default=10, ge=1, le=12)
+
+
 # ------------------------------------------------------------------ helpers
 #: Lazy so importing the app (e.g. in tests) does not create a database.
 _STORE: Storage | None = None
@@ -273,9 +370,60 @@ def _store() -> Storage:
     if _STORE is None:
         _STORE = Storage(SETTINGS.data_dir / "ila.sqlite3")
     return _STORE
+
+
+def get_current_user_optional(request: Request) -> dict[str, Any] | None:
+    token = extract_token(
+        ila_session=request.cookies.get("ila_session"),
+        authorization=request.headers.get("authorization"),
+    )
+    if not token:
+        return None
+    return _store().get_auth_session(token)
+
+
+def get_current_user(
+    user: Annotated[dict[str, Any] | None, Depends(get_current_user_optional)],
+) -> dict[str, Any]:
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
+
+
+def require_student(
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
+) -> dict[str, Any]:
+    if user.get("role") != "student":
+        raise HTTPException(status_code=403, detail="Forbidden: Student access required")
+    return user
+
+
+async def require_teacher(
+    request: Request,
+    user: Annotated[dict[str, Any] | None, Depends(get_current_user_optional)],
+) -> dict[str, Any]:
+    if not user:
+        raise HTTPException(401, "Authentication required")
+    if user["role"] != "teacher":
+        raise HTTPException(403, "Teacher access required")
+    from ila.storage import report_teacher
+    token = report_teacher.set(user["id"] if request.method == "GET" else None)
+    try:
+        yield user
+    finally:
+        report_teacher.reset(token)
+
+
+def require_admin(user: Annotated[dict[str, Any], Depends(get_current_user)]) -> dict[str, Any]:
+    if user["role"] != "admin":
+        raise HTTPException(403, "Administration access required")
+    return user
+
+
 def _resolved_profile(settings: Settings) -> str:
     try:
-        return resolve_profile(settings.llm.profile)
+        from ila.llm import LlamaCppProvider
+        return LlamaCppProvider(settings.llm).profile
     except ValueError:
         return "balanced"
 
@@ -289,7 +437,7 @@ def _notes_provider_info(settings: Settings, profile: str) -> dict[str, Any]:
     size_bytes = path.stat().st_size if path.is_file() else 0
     available = (
         settings.llm.enabled
-        and llama_cpp_installed()
+        and provider.available
         and path.is_file()
         and (size_bytes == expected if expected is not None else size_bytes > 0)
     )
@@ -505,7 +653,8 @@ def _generate_notes_sync(
     resolved: str | None = None
     if settings.llm.enabled:
         try:
-            resolved = resolve_profile(profile or settings.llm.profile)
+            resolved = profile or settings.llm.profile
+            resolve_profile(resolved)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -573,7 +722,263 @@ def _transcribe_file(
     }
 
 
-# --------------------------------------------------------------------- routes
+# --------------------------------------------------------------------- auth routes
+class SchoolAccount(BaseModel):
+    full_name: str = Field(min_length=2, max_length=100)
+    identifier: str = Field(min_length=1, max_length=50)
+    role: Literal["teacher", "student"]
+    class_level: int = Field(ge=9, le=12)
+    section: str = Field(min_length=1, max_length=12)
+    subject: str = ""
+    password: str | None = Field(default=None, min_length=8, max_length=72)
+    active: bool = True
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8,max_length=72)
+
+
+@app.post("/api/auth/password")
+def change_password(item: PasswordChange, user: Annotated[dict, Depends(get_current_user)]):
+    account = _store().get_user_by_id(user["id"])
+    if not verify_password(item.current_password, account["password_hash"]):
+        raise HTTPException(403, "Current password is incorrect")
+    if len(item.new_password.encode()) > 72:
+        raise HTTPException(422, "Password exceeds 72 bytes")
+    _store().reset_password_for_user(user["id"],hash_password(item.new_password))
+    return {"status": "ok"}
+
+
+class SchoolClass(BaseModel):
+    class_level: int = Field(ge=9,le=12)
+    name: str = Field(min_length=1,max_length=80)
+    academic_year: str = Field(min_length=4,max_length=20)
+
+
+@app.post("/api/admin/classes")
+def save_class(item: SchoolClass, admin: Annotated[dict,Depends(require_admin)]):
+    with _store()._connection() as db:
+        db.execute("""INSERT INTO academic_classes VALUES (?,?,?,?) ON CONFLICT(class_level)
+                      DO UPDATE SET name=excluded.name,academic_year=excluded.academic_year""",
+                   (f"class-{item.class_level}",item.class_level,item.name.strip(),item.academic_year.strip()))
+    return {"status":"ok"}
+
+
+class SchoolSection(BaseModel):
+    class_level: int = Field(ge=9, le=12)
+    name: str = Field(min_length=1, max_length=12)
+
+
+@app.get("/api/admin/school")
+def school_directory(admin: Annotated[dict, Depends(require_admin)]):
+    with _store()._connection() as db:
+        return {key: [dict(row) for row in db.execute(sql)] for key, sql in {
+            "users": """SELECT u.id,full_name,student_identifier AS identifier,role,u.class_level,
+                        u.section,is_active AS active,COALESCE(group_concat(a.subject), '') AS subject
+                        FROM users u LEFT JOIN teacher_class_assignments a ON a.teacher_id=u.id
+                        WHERE role IN ('student','teacher') GROUP BY u.id ORDER BY full_name""",
+            "classes":"SELECT class_level,name,academic_year FROM academic_classes ORDER BY class_level",
+            "sections": "SELECT class_level,name FROM sections ORDER BY class_level,name",
+            "subjects": "SELECT class_level,code,name FROM subjects ORDER BY class_level,name"
+        }.items()}
+
+
+@app.post("/api/admin/sections")
+def add_section(item: SchoolSection, admin: Annotated[dict, Depends(require_admin)]):
+    name = item.name.strip().upper()
+    if not name:
+        raise HTTPException(422, "Enter a section name")
+    with _store()._connection() as db:
+        db.execute("INSERT OR IGNORE INTO sections VALUES (?,?,?)",
+                   (f"sec-{item.class_level}-{name}", item.class_level, name))
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/accounts")
+@app.put("/api/admin/accounts/{account_id}")
+def save_school_account(item: SchoolAccount, admin: Annotated[dict, Depends(require_admin)], account_id: str | None = None):
+    from uuid import uuid4
+    from datetime import datetime, timezone
+    name, identifier = item.full_name.strip(), item.identifier.strip()
+    if len(name) < 2 or not identifier or (not account_id and not item.password):
+        raise HTTPException(422, "Enter a name, school ID and initial password")
+    if item.password and len(item.password.encode()) > 72:
+        raise HTTPException(422, "Password exceeds 72 bytes")
+    password_hash = hash_password(item.password) if item.password else None
+    now = datetime.now(timezone.utc).isoformat()
+    with _store()._connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        if not db.execute("SELECT 1 FROM sections WHERE class_level=? AND name=?", (item.class_level,item.section)).fetchone():
+            raise HTTPException(422, "Unknown class or section")
+        if item.role == "teacher" and not db.execute("SELECT 1 FROM subjects WHERE class_level=? AND code=?", (item.class_level,item.subject)).fetchone():
+            raise HTTPException(422, "Select an assigned subject")
+        if db.execute("SELECT 1 FROM users WHERE lower(student_identifier)=lower(?) AND id!=?", (identifier, account_id or "")).fetchone():
+            raise HTTPException(409, "School ID already exists")
+        if account_id:
+            prior = db.execute("SELECT student_identifier FROM users WHERE id=? AND role=?", (account_id,item.role)).fetchone()
+            if not prior:
+                raise HTTPException(404, "Account unavailable")
+            if item.role == "student" and prior[0] and prior[0] != identifier:
+                for table in ("quiz_attempts","quiz_sessions","mastery","remediation_records"):
+                    if db.execute(f"SELECT 1 FROM {table} WHERE student_id=? LIMIT 1",(identifier,)).fetchone():
+                        raise HTTPException(409,"This ID already has learning records")
+                    db.execute(f"UPDATE {table} SET student_id=? WHERE student_id=?",(identifier,prior[0]))
+            db.execute("""UPDATE users SET full_name=?,student_identifier=?,class_level=?,section=?,is_active=?,
+                          updated_at=?,password_hash=coalesce(?,password_hash) WHERE id=?""",
+                       (name,identifier,item.class_level,item.section,item.active,now,password_hash,account_id))
+            if password_hash or not item.active:
+                db.execute("DELETE FROM auth_sessions WHERE user_id=?", (account_id,))
+        else:
+            account_id = uuid4().hex
+            db.execute("""INSERT INTO users(id,full_name,student_identifier,role,class_level,section,password_hash,
+                          created_at,updated_at,is_active) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                       (account_id,name,identifier,item.role,item.class_level,item.section,password_hash,now,now,item.active))
+        if item.role == "student":
+            db.execute("DELETE FROM student_enrollments WHERE student_id=?", (account_id,))
+            db.execute("INSERT INTO student_enrollments VALUES (?,?,?,?,?)", (uuid4().hex,account_id,item.class_level,item.section,identifier))
+        else:
+            db.execute("DELETE FROM teacher_class_assignments WHERE teacher_id=?", (account_id,))
+            db.execute("INSERT INTO teacher_class_assignments VALUES (?,?,?,?,?)", (uuid4().hex,account_id,item.class_level,item.section,item.subject))
+    return {"id": account_id}
+
+
+@app.post("/api/auth/login")
+def auth_login(request: LoginRequest, response: Response) -> dict[str, Any]:
+    ident = (request.identifier or request.email_or_username or "").strip()
+    candidates: list[dict[str, Any]] = []
+
+    # Priority 1: full_name + identifier + role_hint matching
+    if request.full_name and request.identifier and request.role_hint:
+        candidates = _store().get_users_by_name_and_identifier(
+            request.full_name, request.identifier, request.role_hint
+        )
+
+    # Priority 2: Direct identifier (USN or Teacher ID or Email) lookup
+    if not candidates and ident:
+        if request.role_hint:
+            user = _store().get_user_by_identifier_and_role(ident, request.role_hint)
+            if user:
+                candidates = [user]
+        if not candidates:
+            user = _store().get_user_by_identifier(ident)
+            if user:
+                candidates = [user]
+
+    # Priority 3: Lookup by full_name if only name was provided
+    if not candidates and request.full_name and not ident:
+        with _store()._connection() as conn:
+            if request.role_hint == "student":
+                rows = conn.execute(
+                    "SELECT * FROM users WHERE LOWER(full_name) = LOWER(?) AND role = 'student'",
+                    (request.full_name.strip(),),
+                ).fetchall()
+            elif request.role_hint in ("teacher", "admin"):
+                rows = conn.execute(
+                    "SELECT * FROM users WHERE LOWER(full_name) = LOWER(?) AND role IN ('teacher', 'admin')",
+                    (request.full_name.strip(),),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM users WHERE LOWER(full_name) = LOWER(?)",
+                    (request.full_name.strip(),),
+                ).fetchall()
+            candidates = [dict(r) for r in rows]
+
+    if not candidates:
+        if request.role_hint == "teacher":
+            msg = "Invalid Teacher ID or password."
+        elif request.role_hint == "student":
+            msg = "Invalid USN / Roll number or password."
+        else:
+            msg = "Invalid credentials. Check your USN/ID and password."
+        raise HTTPException(status_code=401, detail=msg)
+
+    matching_users = [
+        candidate
+        for candidate in candidates
+        if (not request.role_hint or candidate["role"] == request.role_hint)
+        and verify_password(request.password, candidate["password_hash"])
+    ]
+    if len(matching_users) != 1:
+        if request.role_hint == "teacher":
+            msg = "Invalid Teacher ID or password."
+        elif request.role_hint == "student":
+            msg = "Invalid USN / Roll number or password."
+        else:
+            msg = "Invalid credentials. Check your USN/ID and password."
+        raise HTTPException(status_code=401, detail=msg)
+
+    user = matching_users[0]
+
+    if not user.get("is_active", True):
+        raise HTTPException(
+            status_code=403,
+            detail="Account is deactivated. Contact administrator.",
+        )
+
+    token = generate_session_token()
+    exp = compute_expiration(remember_me=request.remember_me)
+    _store().create_auth_session(user["id"], token, exp)
+
+    max_age = (30 if request.remember_me else 14) * 86400
+    response.set_cookie(
+        key="ila_session",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=max_age,
+    )
+
+    return {
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "full_name": user["full_name"],
+            "email": user["email"],
+            "role": user["role"],
+            "class_level": user["class_level"],
+            "section": user.get("section", "A"),
+            "student_identifier": user["student_identifier"],
+            "created_at": user["created_at"],
+        },
+    }
+
+
+@app.api_route("/api/auth/logout", methods=["GET", "POST"])
+def auth_logout(
+    request: Request,
+    response: Response,
+    user: Annotated[dict[str, Any] | None, Depends(get_current_user_optional)] = None,
+) -> dict[str, Any]:
+    token = extract_token(
+        ila_session=request.cookies.get("ila_session"),
+        authorization=request.headers.get("authorization"),
+    )
+    if token:
+        _store().delete_auth_session(token)
+    response.delete_cookie(key="ila_session")
+    return {"status": "ok", "message": "Logged out successfully"}
+
+
+@app.get("/api/auth/me")
+def auth_me(current_user: Annotated[dict[str, Any], Depends(get_current_user)]) -> dict[str, Any]:
+    return {
+        "user": {
+            "id": current_user["id"],
+            "full_name": current_user["full_name"],
+            "email": current_user["email"],
+            "role": current_user["role"],
+            "class_level": current_user["class_level"],
+            "section": current_user.get("section", "A"),
+            "student_identifier": current_user["student_identifier"],
+            "created_at": current_user["created_at"],
+        }
+    }
+
+
+# --------------------------------------------------------------------- core routes
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     return {
@@ -776,9 +1181,14 @@ def get_ncert_note(unit: int) -> dict[str, Any]:
 
 
 @app.post("/api/notes")
-async def create_notes(request: NotesRequest) -> dict[str, Any]:
+async def create_notes(
+    request: NotesRequest,
+    current_user: Annotated[dict[str, Any] | None, Depends(require_teacher)] = None,
+) -> dict[str, Any]:
     lines = _request_lines(request)
     class_level, subject = _selection(request.class_level, request.subject)
+    if not any(a["class_level"] == class_level and a["subject"] == subject for a in _store().get_teacher_assigned_classes(current_user["id"])):
+        raise HTTPException(403,"Select an assigned class and subject")
     settings = _request_settings(request)
     title = request.title.strip() or "Lecture notes"
 
@@ -790,30 +1200,12 @@ async def create_notes(request: NotesRequest) -> dict[str, Any]:
 
     if request.use_syllabus:
         syllabus = _syllabus_for(lines, class_level, subject)
-        if not syllabus or not getattr(syllabus, "matches", None) or len(syllabus.matches) == 0:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"No syllabus correlation found: The transcript does not correlate with any "
-                    f"NCERT Class {class_level} {subject.capitalize()} topic. Grounded notes dropped. "
-                    f"Please capture a lecture covering syllabus topics (e.g. Real Numbers, Polynomials, Linear Equations, Quadratic Equations)."
-                ),
-            )
-        top_match = syllabus.matches[0]
-        if top_match.score < 1.5:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Insufficient syllabus correlation (score {top_match.score:.1f} < 1.5): "
-                    f"The transcript has too little correlation with '{top_match.chapter.title}'. "
-                    f"Grounded notes dropped. Please provide more subject-specific lecture content."
-                ),
-            )
-        mapped_topic = top_match.chapter.title
-        chapter_number = top_match.chapter.number
-        correlation_score = top_match.score
-        matched_terms = list(top_match.matched_terms)
-        title = f"{mapped_topic} (Class {class_level} {subject.capitalize()})"
+        if syllabus and syllabus.matches:
+            top = syllabus.matches[0]
+            mapped_topic = top.chapter.title
+            chapter_number = top.chapter.number
+            correlation_score = top.score
+            matched_terms = list(top.matched_terms)
 
     try:
         result = await asyncio.to_thread(
@@ -833,6 +1225,7 @@ async def create_notes(request: NotesRequest) -> dict[str, Any]:
     # Store notes along with mapped topic in SQLite storage
     transcript_text = " ".join(line.text for line in lines)
     duration_s = max(0.0, (lines[-1].end or 0.0) - (lines[0].start or 0.0)) if lines else 0.0
+    user_id = current_user["id"] if current_user else None
     session_id = _store().save_session(
         title=title,
         class_level=class_level,
@@ -844,6 +1237,7 @@ async def create_notes(request: NotesRequest) -> dict[str, Any]:
         markdown=result.to_markdown(),
         topic=mapped_topic,
         chapter_number=chapter_number,
+        user_id=user_id,
     )
 
     return {
@@ -858,29 +1252,19 @@ async def create_notes(request: NotesRequest) -> dict[str, Any]:
 
 
 @app.get("/api/lecture-notes/{chapter_number}")
-def get_lecture_notes_for_unit(
-    chapter_number: int,
-    class_level: int = 10,
-    subject: str = "maths",
-) -> dict[str, Any]:
-    level, name = _selection(class_level, subject)
-    session = _store().get_notes_by_chapter(chapter_number, class_level=level, subject=name)
-    if not session:
+def get_lecture_notes_for_unit(chapter_number: int, current_user: Annotated[dict, Depends(require_student)],
+                               class_level: int=10, subject: str="maths"):
+    lessons = _store().list_lessons(class_level=current_user["class_level"], section=current_user["section"],
+                                    subject=subject, status="published")
+    lesson = next((l for l in lessons if l["chapter_number"] == chapter_number), None)
+    if not lesson:
         return {"found": False, "notes": None, "markdown": None}
-    return {
-        "found": True,
-        "session_id": session["id"],
-        "title": session["title"],
-        "topic": session.get("topic"),
-        "chapter_number": session.get("chapter_number"),
-        "markdown": session.get("markdown"),
-        "notes": session.get("notes"),
-        "created_at": session.get("created_at"),
-    }
+    return {"found":True,"title":lesson["title"],"markdown":lesson["notes_markdown"],"notes":lesson["notes_json"]}
 
 
 @app.post("/api/transcribe")
 async def transcribe_upload(
+    current_user: Annotated[dict, Depends(require_teacher)],
     file: Annotated[UploadFile, File()],
     class_level: Annotated[int, Form()] = 10,
     subject: Annotated[str, Form()] = "science",
@@ -890,7 +1274,10 @@ async def transcribe_upload(
     budget_s: Annotated[float | None, Form()] = None,
 ) -> dict[str, Any]:
     level, name = _selection(class_level, subject)
-    upload_dir = SETTINGS.data_dir / "uploads"
+    if not any(a["class_level"] == level and a["subject"] == name for a in _store().get_teacher_assigned_classes(current_user["id"])):
+        raise HTTPException(403,"Select an assigned class and subject")
+    upload_dir = _store().path.parent / "recordings" / f"class_{level}" / name / current_user["id"]
+    saved = False
     upload_dir.mkdir(parents=True, exist_ok=True)
     suffix = Path(file.filename or "lecture.wav").suffix.lower() or ".wav"
     target = upload_dir / f"{uuid4().hex}{suffix}"
@@ -915,7 +1302,7 @@ async def transcribe_upload(
         if total == 0:
             raise HTTPException(status_code=400, detail="The uploaded file is empty")
 
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             _transcribe_file,
             settings,
             target,
@@ -925,6 +1312,9 @@ async def transcribe_upload(
             profile=profile,
             use_llm=settings.llm.enabled,
         )
+        saved = True
+        result["audio_path"] = target.relative_to(_store().path.parent).as_posix()
+        return result
     except HTTPException:
         raise
     except ValueError as exc:
@@ -934,14 +1324,23 @@ async def transcribe_upload(
         raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}") from exc
     finally:
         with contextlib.suppress(OSError):
-            target.unlink(missing_ok=True)
+            if not saved:
+                target.unlink(missing_ok=True)
 
 
 # ------------------------------------------------------------------ Q&A
 @app.post("/api/ask")
-async def ask_question(request: AskRequest) -> dict[str, Any]:
+async def ask_question(request: AskRequest, current_user: Annotated[dict, Depends(require_student)]) -> dict[str, Any]:
     """Answer from the current transcript, a saved session, or the built-in demo."""
+    if request.session_id:
+        get_session(request.session_id, current_user)
+    if request.class_level and request.class_level != current_user["class_level"]:
+        raise HTTPException(403, "This class is outside your enrollment")
     level, name = _selection(request.class_level, request.subject)
+    if not request.lines and not request.text and not request.session_id:
+        lessons = _store().list_lessons(class_level=current_user["class_level"],subject=name,status="published")
+        request.text = "\n".join(l["transcript"]+"\n"+l["notes_markdown"] for l in lessons
+                                 if not request.chapter or l["chapter_number"] == request.chapter)
     cache_key = None
     if not request.lines and not request.text and not request.session_id:
         norm_q = re.sub(r"[^a-z0-9\s]", "", request.question.strip().lower())
@@ -994,7 +1393,24 @@ async def ask_question(request: AskRequest) -> dict[str, Any]:
 
 # ------------------------------------------------------------------ quizzes
 @app.post("/api/quiz/start")
-def start_quiz(request: QuizStartRequest) -> dict[str, Any]:
+def start_quiz(
+    request: QuizStartRequest,
+    current_user: Annotated[dict[str, Any] | None, Depends(require_student)] = None,
+) -> dict[str, Any]:
+    if request.session_id:
+        get_session(request.session_id, current_user)
+    if request.class_level and request.class_level != current_user["class_level"]:
+        raise HTTPException(403, "This class is outside your enrollment")
+    if request.lesson_id:
+        lesson = _published_lesson(request.lesson_id,current_user)
+        request.class_level, request.subject = lesson["class_level"], lesson["subject"]
+        request.lines, request.session_id = [], None
+        request.text = lesson["transcript"] + "\n" + lesson["notes_markdown"]
+    elif request.chapter_number:
+        material = _store().list_lessons(class_level=current_user["class_level"],subject=request.subject,status="published")
+        request.text = "\n".join(l["transcript"] for l in material if l["chapter_number"] == request.chapter_number)
+        if not request.text:
+            raise HTTPException(404,"No published lectures for this chapter")
     level, name = _selection(request.class_level, request.subject)
     knowledge, meta = _knowledge_base(
         lines=request.lines,
@@ -1012,11 +1428,15 @@ def start_quiz(request: QuizStartRequest) -> dict[str, Any]:
                 "Try a demo lecture with definitions, or record a longer session."
             ),
         )
+    student_id = request.student_id
+    if current_user and current_user.get("role") == "student":
+        student_id = current_user.get("student_identifier") or current_user["id"]
+
     engine = QuizEngine(_store())
     try:
         result = engine.start(
             knowledge,
-            student_id=request.student_id,
+            student_id=student_id,
             class_level=level,
             subject=name,
             topic=request.topic,
@@ -1027,36 +1447,80 @@ def start_quiz(request: QuizStartRequest) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     result["source"] = meta
+    if request.lesson_id:
+        with _store()._connection() as db:
+            db.execute("INSERT INTO lesson_quizzes VALUES (?,?,?)",(result["quiz_id"],request.lesson_id,current_user["id"]))
     result["topics"] = sorted({question.topic for question in pool})
     return result
 
 
 @app.post("/api/quiz/answer")
-def answer_quiz(request: QuizAnswerRequest) -> dict[str, Any]:
+def answer_quiz(
+    request: QuizAnswerRequest,
+    current_user: Annotated[dict[str, Any] | None, Depends(require_student)] = None,
+) -> dict[str, Any]:
+    if current_user and current_user.get("role") == "student":
+        quiz_data = _store().get_quiz(request.quiz_id)
+        if quiz_data:
+            s_id = current_user.get("student_identifier") or current_user["id"]
+            if quiz_data["student_id"] not in (s_id, current_user["id"]):
+                raise HTTPException(
+                    status_code=403, detail="Forbidden: You cannot answer another student's quiz."
+                )
+
     llm = _ask_llm_provider()
     engine = QuizEngine(_store(), llm=llm)
     try:
-        return engine.answer(
+        result = engine.answer(
             request.quiz_id,
             question_id=request.question_id,
             answer=request.answer,
             answer_index=request.answer_index,
             response_ms=request.response_ms,
         )
+        if result["completed"]:
+            with _store()._connection() as db:
+                link = db.execute("SELECT lesson_id FROM lesson_quizzes WHERE quiz_id=? AND student_id=?",
+                                  (request.quiz_id,current_user["id"])).fetchone()
+            if link:
+                _store().record_lesson_activity(current_user["id"],link[0],"quiz_completed",{"score":result["progress"]["score"]})
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/students/{student_id}/gaps")
-def student_gaps(student_id: str, limit: int = 5) -> dict[str, Any]:
+def student_gaps(
+    student_id: str,
+    limit: int = 5,
+    current_user: Annotated[dict[str, Any] | None, Depends(require_student)] = None,
+) -> dict[str, Any]:
+    if current_user and current_user.get("role") == "student":
+        auth_id = current_user.get("student_identifier") or current_user["id"]
+        if student_id not in (auth_id, current_user["id"]):
+            raise HTTPException(
+                status_code=403,
+                detail="Forbidden: You cannot view another student's knowledge gaps.",
+            )
     return QuizEngine(_store()).gaps(student_id, limit=max(1, min(limit, 20)))
 
 
 # ------------------------------------------------------------------ auto-remediation
 @app.post("/api/remediation/generate")
-async def generate_remediation(request: RemediationGenerateRequest) -> dict[str, Any]:
+async def generate_remediation(
+    request: RemediationGenerateRequest,
+    current_user: Annotated[dict[str, Any] | None, Depends(require_student)] = None,
+) -> dict[str, Any]:
     from ila.remediation import AutoRemediationEngine
 
+    student_id = request.student_id
+    if current_user and current_user.get("role") == "student":
+        student_id = current_user.get("student_identifier") or current_user["id"]
+
+    if request.session_id:
+        get_session(request.session_id, current_user)
+    if request.class_level and request.class_level != current_user["class_level"]:
+        raise HTTPException(403, "This class is outside your enrollment")
     level, name = _selection(request.class_level, request.subject)
     knowledge, meta = _knowledge_base(
         lines=request.lines,
@@ -1070,7 +1534,7 @@ async def generate_remediation(request: RemediationGenerateRequest) -> dict[str,
     result = await asyncio.to_thread(
         engine.generate_remediation_pack,
         knowledge,
-        student_id=request.student_id,
+        student_id=student_id,
         topic=request.topic,
         count=request.count,
     )
@@ -1079,15 +1543,25 @@ async def generate_remediation(request: RemediationGenerateRequest) -> dict[str,
 
 
 @app.post("/api/remediation/submit")
-def submit_remediation(request: RemediationAnswerRequest) -> dict[str, Any]:
+def submit_remediation(
+    request: RemediationAnswerRequest,
+    current_user: Annotated[dict[str, Any] | None, Depends(require_student)] = None,
+) -> dict[str, Any]:
     from ila.remediation import AutoRemediationEngine
 
+    student_id = request.student_id
+    if current_user and current_user.get("role") == "student":
+        student_id = current_user.get("student_identifier") or current_user["id"]
+
+    pack = _store().get_quiz(request.pack_id)
+    if not pack or pack["student_id"] not in (student_id,current_user["id"]):
+        raise HTTPException(404,"Remediation pack unavailable")
     llm = _ask_llm_provider()
     engine = AutoRemediationEngine(_store(), llm=llm)
     try:
         return engine.evaluate_remediation_answer(
             pack_id=request.pack_id,
-            student_id=request.student_id,
+            student_id=student_id,
             item_id=request.item_id,
             answer=request.answer,
             selected_index=request.selected_index,
@@ -1097,40 +1571,472 @@ def submit_remediation(request: RemediationAnswerRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+# ------------------------------------------------------------------ academic hierarchy routes
+@app.get("/api/classes")
+def api_get_classes() -> list[dict[str, Any]]:
+    return _store().get_classes()
+
+
+@app.get("/api/classes/{class_level}/subjects")
+def api_get_class_subjects(class_level: int) -> list[dict[str, Any]]:
+    return _store().get_subjects(class_level)
+
+
+@app.get("/api/classes/{class_level}/subjects/{subject}/chapters")
+def api_get_class_chapters(class_level: int, subject: str) -> list[dict[str, Any]]:
+    return _store().get_chapters(class_level, subject)
+
+
+@app.get("/api/classes/{class_level}/timetable")
+def api_get_class_timetable(class_level: int, section: str = "A") -> list[dict[str, Any]]:
+    return _store().get_timetable(class_level, section)
+
+
+# ------------------------------------------------------------------ student workspace
+@app.get("/api/student/overview")
+def get_student_overview(
+    current_user: Annotated[dict[str, Any], Depends(require_student)],
+) -> dict[str, Any]:
+    student_id = current_user.get("student_identifier") or current_user["id"]
+    data = _store().student_overview(student_id=student_id, user_id=current_user["id"])
+    data["full_name"] = current_user.get("full_name")
+    data["class_level"] = current_user.get("class_level", 10)
+    data["section"] = current_user.get("section", "A")
+    data["email"] = current_user.get("email")
+
+    # Enrich with today's published lessons, timetable, and notifications
+    enrollment = _store().get_student_enrollment(current_user["id"])
+    class_level = enrollment.get("class_level", 10)
+    section = enrollment.get("section", "A")
+
+    today_lessons = _store().list_lessons(
+        class_level=class_level,
+        status="published",
+        limit=6,
+    )
+    timetable = _store().get_timetable(class_level, section)
+    notifications = _store().get_user_notifications(current_user["id"], unread_only=False)
+
+    from datetime import date
+    from datetime import datetime
+    data["today_lessons"] = [lesson for lesson in today_lessons if lesson.get("published_at")
+                             and datetime.fromisoformat(lesson["published_at"]).astimezone().date() == date.today()]
+    data["recent_notes"] = today_lessons
+    with _store()._connection() as db:
+        year = db.execute("SELECT academic_year FROM academic_classes WHERE class_level=?",(class_level,)).fetchone()
+        data["academic_year"] = year[0] if year else None
+        data["assignments"] = [dict(r) for r in db.execute("""SELECT title,subject,due_date FROM assignments
+            WHERE class_level=? AND section=? AND due_date>=? ORDER BY due_date LIMIT 10""",
+            (class_level,section,date.today().isoformat()))]
+        data["pending_quizzes"] = [dict(r) for r in db.execute("""SELECT l.id,l.title FROM lessons l
+            LEFT JOIN lesson_completions c ON l.id=c.lesson_id AND c.student_id=?
+            WHERE l.status='published' AND l.class_level=? AND coalesce(c.quiz_completed,0)=0
+            ORDER BY l.published_at DESC LIMIT 10""",(current_user["id"],class_level))]
+    data["timetable"] = timetable
+    data["notifications"] = notifications
+    return data
+
+
+@app.get("/api/student/progress")
+def get_student_progress(
+    current_user: Annotated[dict[str, Any], Depends(require_student)],
+) -> dict[str, Any]:
+    student_id = current_user.get("student_identifier") or current_user["id"]
+    data = _store().student_progress(student_id=student_id, user_id=current_user["id"])
+    data["full_name"] = current_user.get("full_name")
+    data["class_level"] = current_user.get("class_level", 10)
+    data["section"] = current_user.get("section", "A")
+    return data
+
+
+@app.get("/api/student/subjects")
+def student_subjects(
+    current_user: Annotated[dict[str, Any], Depends(require_student)],
+) -> list[dict[str, Any]]:
+    enrollment = _store().get_student_enrollment(current_user["id"])
+    class_level = enrollment.get("class_level", 10)
+    section = enrollment.get("section", "A")
+    return _store().get_student_subjects_tree(current_user["id"], class_level, section)
+
+
+def _published_lesson(lesson_id, current_user):
+    lesson = _store().get_lesson(lesson_id)
+    if not lesson or lesson.get("status") != "published":
+        raise HTTPException(status_code=404, detail="Lesson not found or not yet published by teacher")
+
+    enrollment = _store().get_student_enrollment(current_user["id"])
+    user_level = enrollment.get("class_level", 10)
+    if lesson["class_level"] != user_level:
+        raise HTTPException(status_code=403, detail="Forbidden: Lesson is not for your class")
+
+    return lesson
+
+
+@app.get("/api/student/lessons/{lesson_id}")
+def student_lesson_detail(
+    lesson_id: str,
+    current_user: Annotated[dict[str, Any], Depends(require_student)],
+) -> dict[str, Any]:
+    lesson = _published_lesson(lesson_id,current_user)
+    _store().record_lesson_activity(current_user["id"], lesson_id, "opened", {"lesson_title": lesson["title"]})
+    completion = _store().get_lesson_completion(current_user["id"], lesson_id)
+    return {
+        "lesson": lesson,
+        "completion": completion,
+    }
+
+
+@app.post("/api/student/lessons/{lesson_id}/activity")
+def student_record_activity(
+    lesson_id: str,
+    request: LessonActivityRequest,
+    current_user: Annotated[dict[str, Any], Depends(require_student)],
+) -> dict[str, Any]:
+    _published_lesson(lesson_id,current_user)
+    _store().record_lesson_activity(current_user["id"], lesson_id, request.event_type, {k:v for k,v in (request.metadata or {}).items() if k != "score"})
+    return {"status": "ok"}
+
+
+@app.post("/api/student/lessons/{lesson_id}/complete")
+def student_mark_lesson_complete(
+    lesson_id: str,
+    request: LessonCompleteRequest,
+    current_user: Annotated[dict[str, Any], Depends(require_student)],
+) -> dict[str, Any]:
+    _published_lesson(lesson_id,current_user)
+    return _store().mark_lesson_completed(current_user["id"], lesson_id, request.completed)
+
+
+@app.get("/api/student/notifications")
+def student_notifications(
+    current_user: Annotated[dict[str, Any], Depends(require_student)],
+) -> list[dict[str, Any]]:
+    return _store().get_user_notifications(current_user["id"])
+
+
+@app.post("/api/student/notifications/{notification_id}/read")
+def student_mark_notification_read(
+    notification_id: str,
+    current_user: Annotated[dict[str, Any], Depends(require_student)],
+) -> dict[str, Any]:
+    success = _store().mark_notification_read(notification_id, current_user["id"])
+    return {"status": "ok" if success else "not_found"}
+
+
+@app.get("/api/student/practice")
+def student_practice(
+    current_user: Annotated[dict[str, Any], Depends(require_student)],
+) -> dict[str, Any]:
+    enrollment = _store().get_student_enrollment(current_user["id"])
+    return _store().get_student_practice_data(current_user.get("student_identifier") or current_user["id"], enrollment.get("class_level"))
+
+
 # ------------------------------------------------------------------ teacher dashboard
 @app.get("/api/teacher/overview")
-def teacher_overview() -> dict[str, Any]:
-    return _store().teacher_overview()
+def teacher_overview(
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)],
+) -> dict[str, Any]:
+    ov = _store().teacher_overview()
+    assigned = _store().get_teacher_assigned_classes(current_user["id"])
+    t_lessons = _store().list_lessons(teacher_id=current_user["id"])
+    ov["assigned_classes"] = assigned
+    ov["total_published_lessons"] = sum(1 for l in t_lessons if l.get("status") == "published")
+    ov["lessons_awaiting_review"] = sum(1 for l in t_lessons if l.get("status") == "ready_for_review")
+    ov["draft_lessons"] = sum(1 for l in t_lessons if l.get("status") == "draft")
+    # Lesson-based student activity log (has event_type, lesson_title, etc.)
+    ov["recent_activity"] = _store().get_student_activity_log(limit=10)
+    # Provide a proper list for students_needing_attention (not just the count)
+    ov["students_needing_attention_list"] = _store().get_students_needing_attention(
+        teacher_id=current_user["id"]
+    )
+    # class_accuracy field for the KPI tile
+    ov["class_accuracy"] = ov.get("overall_accuracy", 0.0)
+    return ov
+
+
+@app.get("/api/teacher/classes")
+def teacher_classes(
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)],
+) -> list[dict[str, Any]]:
+    assigned = _store().get_teacher_assigned_classes(current_user["id"])
+    result = []
+    for item in assigned:
+        level = item["class_level"]
+        sec = item["section"]
+        subj = item["subject"]
+        students = _store().get_teacher_students_for_class(level, sec)
+        chapters = _store().get_chapters(level, subj)
+        timetable = _store().get_timetable(level, sec)
+        lessons = _store().list_lessons(class_level=level, section=sec, subject=subj, teacher_id=current_user["id"])
+        result.append({
+            "class_level": level,
+            "section": sec,
+            "subject": subj,
+            "subject_label": SUBJECT_LABELS.get(subj, subj.capitalize()),
+            "students_count": len(students),
+            "students": students,
+            "chapters": chapters,
+            "timetable": timetable,
+            "lessons": lessons,
+        })
+    return result
+
+
+@app.get("/api/teacher/lessons")
+def teacher_lessons(
+    class_level: int | None = None,
+    section: str | None = None,
+    subject: str | None = None,
+    status: str | None = None,
+    search: str | None = None,
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)] = None,
+) -> list[dict[str, Any]]:
+    if class_level is not None and not _store().is_teacher_authorized_for_class(current_user["id"], class_level, section):
+        raise HTTPException(status_code=403, detail="Forbidden: You are not assigned to manage this class")
+    return _store().list_lessons(
+        class_level=class_level,
+        section=section,
+        subject=subject,
+        status=status,
+        teacher_id=current_user["id"] if current_user.get("role") != "admin" else None,
+        search=search,
+    )
+
+
+@app.post("/api/teacher/lessons")
+def teacher_create_lesson(
+    request: LessonCreateRequest,
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)],
+) -> dict[str, Any]:
+    if not any(a["class_level"] == request.class_level and a["section"] == request.section and a["subject"] == request.subject for a in _store().get_teacher_assigned_classes(current_user["id"])):
+        raise HTTPException(status_code=403, detail="Forbidden: You are not assigned to manage this class")
+    if request.status not in ("draft","ready_for_review"):
+        raise HTTPException(422, "Save a draft before publishing")
+    lesson_id = _store().create_lesson(
+        title=request.title,
+        class_level=request.class_level,
+        section=request.section,
+        subject=request.subject,
+        chapter_number=request.chapter_number,
+        chapter_title=request.chapter_title,
+        teacher_id=current_user["id"],
+        teaching_date=request.teaching_date,
+        transcript=request.transcript,
+        notes_markdown=request.notes_markdown,
+        notes_json=request.notes_json,
+        key_concepts=request.key_concepts,
+        examples=request.examples,
+        duration_s=request.duration_s,
+        audio_filename=request.audio_filename,
+        audio_path=request.audio_path,
+        status=request.status,
+    )
+    return {"lesson_id": lesson_id, "status": request.status, "message": "Lesson successfully created"}
+
+
+@app.get("/api/teacher/lessons/{lesson_id}")
+def teacher_get_lesson(
+    lesson_id: str,
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)],
+) -> dict[str, Any]:
+    lesson = _store().get_lesson(lesson_id)
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    if lesson["teacher_id"] != current_user["id"] or not any(
+        a["class_level"] == lesson["class_level"] and a["section"] == lesson["section"] and a["subject"] == lesson["subject"]
+        for a in _store().get_teacher_assigned_classes(current_user["id"])
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden: You are not assigned to manage this lesson's class")
+    return lesson
+
+
+@app.put("/api/teacher/lessons/{lesson_id}")
+def teacher_update_lesson(
+    lesson_id: str,
+    request: LessonUpdateRequest,
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)],
+) -> dict[str, Any]:
+    lesson = _store().get_lesson(lesson_id)
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    if lesson["teacher_id"] != current_user["id"] or not any(
+        a["class_level"] == lesson["class_level"] and a["section"] == lesson["section"] and a["subject"] == lesson["subject"]
+        for a in _store().get_teacher_assigned_classes(current_user["id"])
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden: You are not assigned to manage this lesson's class")
+    if request.status == "published":
+        raise HTTPException(422, "Use the lesson publication action")
+    success = _store().update_lesson(
+        lesson_id,
+        title=request.title,
+        transcript=request.transcript,
+        notes_markdown=request.notes_markdown,
+        notes_json=request.notes_json,
+        key_concepts=request.key_concepts,
+        examples=request.examples,
+        status=request.status,
+        duration_s=request.duration_s,
+        audio_filename=request.audio_filename,
+        audio_path=request.audio_path,
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to update lesson")
+    return {"status": "ok", "message": "Lesson updated successfully"}
+
+
+@app.post("/api/teacher/lessons/{lesson_id}/publish")
+def teacher_publish_lesson(
+    lesson_id: str,
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)],
+) -> dict[str, Any]:
+    lesson = _store().get_lesson(lesson_id)
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    if lesson["teacher_id"] != current_user["id"] or not any(
+        a["class_level"] == lesson["class_level"] and a["section"] == lesson["section"] and a["subject"] == lesson["subject"]
+        for a in _store().get_teacher_assigned_classes(current_user["id"])
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden: You are not assigned to manage this lesson's class")
+    if not lesson["transcript"].strip() or not lesson["notes_markdown"].strip():
+        raise HTTPException(422, "Review the transcript and notes before publishing")
+    published = _store().publish_lesson(lesson_id, current_user["id"])
+    return {
+        "status": "published",
+        "lesson": published,
+        "message": f"Lesson '{lesson['title']}' published to Class {lesson['class_level']}{lesson['section']}",
+    }
+
+
+@app.post("/api/teacher/lessons/{lesson_id}/archive")
+def teacher_archive_lesson(
+    lesson_id: str,
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)],
+) -> dict[str, Any]:
+    lesson = _store().get_lesson(lesson_id)
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    if lesson["teacher_id"] != current_user["id"] or not any(
+        a["class_level"] == lesson["class_level"] and a["section"] == lesson["section"] and a["subject"] == lesson["subject"]
+        for a in _store().get_teacher_assigned_classes(current_user["id"])
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden: You are not assigned to manage this lesson's class")
+    success = _store().archive_lesson(lesson_id, current_user["id"])
+    return {"status": "archived", "message": "Lesson archived"}
+
+
+@app.post("/api/teacher/lessons/{lesson_id}/regenerate-notes")
+def teacher_regenerate_notes(
+    lesson_id: str,
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)],
+) -> dict[str, Any]:
+    lesson = _store().get_lesson(lesson_id)
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    if lesson["teacher_id"] != current_user["id"] or not any(
+        a["class_level"] == lesson["class_level"] and a["section"] == lesson["section"] and a["subject"] == lesson["subject"]
+        for a in _store().get_teacher_assigned_classes(current_user["id"])
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden: You are not assigned to manage this lesson's class")
+    transcript = lesson.get("transcript", "")
+    if not transcript or not transcript.strip():
+        raise HTTPException(status_code=400, detail="Lesson has no transcript to generate notes from")
+
+    lines = lines_from_text(transcript)
+    settings = SETTINGS.model_copy(deep=True)
+    provider = LLM_REGISTRY.get(settings, profile="auto")
+    generator = NotesGenerator(provider)
+    syllabus_ctx = _syllabus_for(lines, lesson["class_level"], lesson["subject"])
+    note_result = generator.generate(lines, title=lesson["title"], syllabus=syllabus_ctx)
+    markdown = note_result.to_markdown()
+
+    _store().update_lesson(
+        lesson_id,
+        notes_markdown=markdown,
+        notes_json=note_result.to_dict(),
+        status="ready_for_review",
+    )
+    return {
+        "status": "ready_for_review",
+        "notes_markdown": markdown,
+        "notes_json": note_result.to_dict(),
+        "message": "Structured notes successfully generated and saved for review",
+    }
+
+
+@app.get("/api/teacher/activity")
+def teacher_activity(
+    class_level: int | None = None,
+    section: str | None = None,
+    student_id: str | None = None,
+    limit: int = 50,
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)] = None,
+) -> list[dict[str, Any]]:
+    if class_level is not None and not _store().is_teacher_authorized_for_class(current_user["id"], class_level, section):
+        raise HTTPException(status_code=403, detail="Forbidden: You are not assigned to manage this class")
+    return _store().get_student_activity_log(
+        class_level=class_level,
+        section=section,
+        student_id=student_id,
+        limit=limit,
+    )
 
 
 @app.get("/api/teacher/students")
-def teacher_students() -> dict[str, Any]:
-    students = _store().list_students()
-    return {"students": students}
+def teacher_students(
+    search: str | None = None,
+    class_level: int | None = None,
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)] = None,
+) -> dict[str, Any]:
+    detailed = _store().list_students_detailed(search=search, class_filter=class_level)
+    legacy_list = _store().list_students()
+    return {
+        "students": legacy_list,
+        "directory": detailed,
+    }
 
 
 @app.get("/api/teacher/students/{student_id}")
-def teacher_student_detail(student_id: str) -> dict[str, Any]:
+def teacher_student_detail(
+    student_id: str,
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)] = None,
+) -> dict[str, Any]:
+    if not (_store().get_user_by_id(student_id) or _store().get_user_by_identifier_and_role(student_id, "student")):
+        raise HTTPException(404, "Student outside assigned roster")
+    profile = _store().teacher_student_profile(student_id)
     engine = QuizEngine(_store())
     gaps_info = engine.gaps(student_id, limit=10)
-    mastery_rows = _store().list_mastery(student_id)
-    recent = _store().recent_attempts(student_id, limit=50)
-    return {
-        "student_id": student_id,
-        "gaps": gaps_info.get("gaps", []),
-        "overall": gaps_info.get("overall", 0.0),
-        "attempts": gaps_info.get("attempts", 0),
-        "classifier_model": gaps_info.get("classifier_model", "DecisionTreeClassifier"),
-        "mastery": mastery_rows,
-        "recent_attempts": recent,
-    }
+    account = _store().get_user_by_identifier_and_role(student_id,"student") or _store().get_user_by_id(student_id)
+    profile["lesson_history"] = _store().get_student_activity_log(student_id=account["id"])
+    profile["classifier_model"] = gaps_info.get("classifier_model", "DecisionTreeClassifier")
+    profile["gaps"] = gaps_info.get("gaps", [])
+    profile["student_id"] = student_id
+    profile["mastery"] = profile.get("topic_analysis", [])
+    return profile
+
+
+@app.get("/api/teacher/gaps")
+def get_teacher_gaps(
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)],
+) -> dict[str, Any]:
+    return _store().teacher_gaps_analytics()
+
+
+@app.get("/api/teacher/improvement")
+def get_teacher_improvement(
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)],
+) -> dict[str, Any]:
+    return _store().teacher_improvement_tracking()
 
 
 # ---------------------------------------------------------------- saved sessions
 @app.post("/api/sessions")
-def create_session(request: SessionRequest) -> dict[str, Any]:
+def create_session(
+    request: SessionRequest,
+    current_user: Annotated[dict[str, Any] | None, Depends(get_current_user)] = None,
+) -> dict[str, Any]:
     level, name = _selection(request.class_level, request.subject)
     lines = _request_lines(NotesRequest(lines=request.lines, text=request.text))
+    user_id = current_user["id"] if current_user else None
     session_id = _store().save_session(
         title=request.title.strip() or "Lecture",
         class_level=level,
@@ -1140,19 +2046,24 @@ def create_session(request: SessionRequest) -> dict[str, Any]:
         duration_s=request.duration_s,
         notes=request.notes,
         markdown=request.markdown,
+        user_id=user_id,
     )
     return {"id": session_id, "session": _store().get_session(session_id)}
 
 
 @app.get("/api/sessions")
-def list_sessions(limit: int = 50) -> dict[str, Any]:
-    return {"sessions": _store().list_sessions(limit=max(1, min(limit, 200)))}
+def list_sessions(
+    limit: int = 50,
+    current_user: Annotated[dict[str, Any] | None, Depends(get_current_user)] = None,
+) -> dict[str, Any]:
+    user_id = current_user["id"]
+    return {"sessions": _store().list_sessions(limit=max(1, min(limit, 200)), user_id=user_id)}
 
 
 @app.get("/api/sessions/{session_id}")
-def get_session(session_id: str) -> dict[str, Any]:
+def get_session(session_id: str, current_user: Annotated[dict, Depends(get_current_user)]) -> dict[str, Any]:
     session = _store().get_session(session_id)
-    if session is None:
+    if not session or session.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
 
@@ -1160,6 +2071,10 @@ def get_session(session_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------- WebSocket
 @app.websocket("/ws/captions")
 async def captions_socket(websocket: WebSocket) -> None:
+    user = _store().get_auth_session(websocket.cookies.get("ila_session") or "")
+    if not user or user["role"] != "teacher":
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
 
     try:
@@ -1300,9 +2215,31 @@ if HTML_NOTES_DIR.is_dir():
         name="notes_html",
     )
 
+from starlette.exceptions import HTTPException as StaticHTTPException
+
+class SPAStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope: Any) -> Response:
+        if scope.get("type") == "http" and str(scope.get("path", "")).startswith("/api"):
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        try:
+            response = await super().get_response(path, scope)
+            if response.status_code == 404 and scope.get("method") in ("GET", "HEAD"):
+                index_path = Path(self.directory) / "index.html"
+                if index_path.is_file():
+                    return FileResponse(index_path)
+            return response
+        except StaticHTTPException as exc:
+            if exc.status_code == 404 and scope.get("method") in ("GET", "HEAD") and not str(scope.get("path", "")).startswith("/api"):
+                index_path = Path(self.directory) / "index.html"
+                if index_path.is_file():
+                    return FileResponse(index_path)
+            raise
+
+
 if DASHBOARD_DIST.is_dir():
-    app.mount("/", StaticFiles(directory=str(DASHBOARD_DIST), html=True), name="dashboard")
+    app.mount("/", SPAStaticFiles(directory=str(DASHBOARD_DIST), html=True), name="dashboard")
 else:
+
 
     @app.get("/")
     def dashboard_not_built() -> dict[str, str]:

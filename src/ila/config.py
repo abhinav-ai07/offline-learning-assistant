@@ -25,7 +25,20 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 def ila_home() -> Path:
     """Root folder for downloaded models and session data."""
     override = os.environ.get("ILA_HOME")
-    return Path(override).expanduser() if override else Path.home() / ".ila"
+    if override:
+        return Path(override).expanduser()
+    candidate = Path.home() / ".ila"
+    try:
+        candidate.mkdir(parents=True, exist_ok=True)
+        # Verify writable
+        test_file = candidate / ".write_test"
+        test_file.touch(exist_ok=True)
+        test_file.unlink(missing_ok=True)
+        return candidate
+    except Exception:
+        fallback = Path(__file__).resolve().parents[2] / ".ila"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
 
 
 def default_model_dir() -> Path:

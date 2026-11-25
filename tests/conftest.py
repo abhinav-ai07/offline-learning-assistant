@@ -38,3 +38,20 @@ def speech_like(seconds: float, *, dbfs: float = -20.0) -> np.ndarray:
 @pytest.fixture
 def sr() -> int:
     return SAMPLE_RATE
+
+@pytest.fixture
+def school_session():
+    """Sign a test client into an isolated school using a stored bearer session."""
+    from ila.auth import compute_expiration, generate_session_token
+
+    def sign_in(client, storage, role, identifier):
+        user = storage.get_user_by_identifier_and_role(identifier,role)
+        if not user:
+            user = storage.create_user(full_name=identifier,role=role,student_identifier=identifier,
+                                       password_hash="unusable-test-hash")
+        token = generate_session_token()
+        storage.create_auth_session(user["id"],token,compute_expiration())
+        client.headers["Authorization"] = f"Bearer {token}"
+        return token
+
+    return sign_in

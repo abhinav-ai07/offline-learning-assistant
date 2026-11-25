@@ -87,7 +87,7 @@ def test_subject_aliases() -> None:
 
 def test_invalid_class_is_rejected() -> None:
     with pytest.raises(ValueError):
-        get_course(11, "science")
+        get_course(13, "science")
 
 
 def test_light_lecture_matches_chapter_nine() -> None:

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import subprocess
+import tempfile
 import threading
 from collections.abc import Sequence
 from pathlib import Path
@@ -38,7 +40,14 @@ class LlamaCppProvider:
 
     def __init__(self, settings: LlmSettings, *, profile: str | None = None) -> None:
         self._settings = settings
-        self._profile = profile or resolve_profile(settings.profile)
+        self._profile = resolve_profile(profile or settings.profile)
+        self._completion = Path(settings.model_dir).parent.parent / "runtime" / "llama-completion.exe"
+        if (profile or settings.profile) == "auto":
+            if not self.path.is_file():
+                for name,spec in PROFILE_MODELS.items():
+                    if (Path(settings.model_dir)/spec.filename).is_file():
+                        self._profile = name
+                        break
         self._model: Llama | None = None
         self._lock = threading.Lock()
 
@@ -65,7 +74,7 @@ class LlamaCppProvider:
     @property
     def available(self) -> bool:
         path = self.path
-        if not llama_cpp_installed() or not path.is_file():
+        if not (self._completion.is_file() or llama_cpp_installed()) or not path.is_file():
             return False
         size = path.stat().st_size
         expected = self.expected_bytes
@@ -142,6 +151,21 @@ class LlamaCppProvider:
         temperature: float = 0.2,
         stop: Sequence[str] | None = None,
     ) -> str:
+        if self._completion.is_file():
+            prompt = "".join(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n" for m in messages)
+            prompt += "<|im_start|>assistant\n<think>\n\n</think>\n"
+            with tempfile.TemporaryDirectory() as folder:
+                source = Path(folder) / "prompt.txt"
+                source.write_text(prompt,encoding="utf-8")
+                result = subprocess.run(
+                    [str(self._completion), "-m", str(self.path), "-f", str(source),
+                     "--no-conversation", "--no-display-prompt", "--simple-io",
+                     "-c", str(self._settings.n_ctx), "-t",str(self._threads()),
+                     "-n",str(max_tokens),"--temp",str(temperature)],
+                    stdin=subprocess.DEVNULL,capture_output=True,encoding="utf-8",errors="replace",
+                    timeout=max(30,self._settings.budget_s),check=True,
+                )
+            return result.stdout.split("<|im_end|>")[0].strip().removesuffix("[end of text]").strip()
         model = self._ensure_loaded()
         stops = list(stop) if stop else list(_STOP)
 

@@ -468,6 +468,17 @@ COURSES: dict[tuple[int, str], Course] = {
 }
 
 
+# Classroom-only subjects can use the lecture transcript without a textbook index.
+SCHOOL_SUBJECTS = {9: ("english", "social"), 10: ("english", "social"),
+                   11: ("maths", "science", "physics", "chemistry", "biology", "english"),
+                   12: ("maths", "science", "physics", "chemistry", "biology", "english")}
+for level, subjects in SCHOOL_SUBJECTS.items():
+    for code in subjects:
+        SUBJECT_LABELS.setdefault(code, "Social Science" if code == "social" else code.title())
+        _SUBJECT_ALIASES.setdefault(code, code)
+        COURSES.setdefault((level, code), Course(level, code, ()))
+
+
 def normalize_subject(subject: str) -> str:
     key = subject.strip().lower()
     normalized = _SUBJECT_ALIASES.get(key)

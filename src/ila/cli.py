@@ -870,5 +870,57 @@ def calibrate(
     )
 
 
+@app.command("create-admin")
+def create_admin():
+    """Provision a local school administrator with a hidden password prompt."""
+    from ila.storage import Storage
+    from ila.auth import hash_password
+    store = Storage(load_settings().data_dir / "ila.sqlite3")
+    if store.count_users("admin"):
+        raise SystemExit("The initial administration account already exists")
+    name = typer.prompt("Administrator name")
+    identifier = typer.prompt("School ID")
+    password = typer.prompt("Password", hide_input=True, confirmation_prompt=True)
+    if len(password) < 8 or len(password.encode()) > 72:
+        raise typer.BadParameter("Use at least eight characters and at most 72 bytes")
+    try:
+        store.create_user(full_name=name, student_identifier=identifier,
+                      password_hash=hash_password(password), role="admin")
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    console.print("Administration account created.")
+
+
+@app.command("create-teacher")
+def create_teacher(
+    name: Annotated[str, typer.Option("--name", "-n", help="Full name of teacher")],
+    teacher_id: Annotated[str, typer.Option("--id", "-i", help="Teacher ID")],
+    password: Annotated[str, typer.Option("--password", "-p", help="Teacher account password")],
+) -> None:
+    """Bootstrap or create a new teacher account in local SQLite database."""
+    from ila.auth import hash_password
+    from ila.storage import Storage
+
+    settings = load_settings()
+    store = Storage(settings.data_dir / "ila.sqlite3")
+    hashed = hash_password(password)
+    try:
+        user = store.create_user(
+            full_name=name,
+            password_hash=hashed,
+            role="teacher",
+            student_identifier=teacher_id,
+        )
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}.[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print("[green]Teacher account created successfully![/green]")
+    console.print(f"  Name: {user['full_name']}")
+    console.print(f"  Teacher ID: {user['student_identifier']}")
+    console.print(f"  Role: {user['role']}")
+    console.print(f"  ID: {user['id']}")
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
+

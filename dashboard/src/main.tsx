@@ -13,3 +13,4 @@ createRoot(container).render(
     <App />
   </StrictMode>,
 );
+import "./academic.css";

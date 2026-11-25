@@ -56,7 +56,8 @@ def test_demo_rejects_unknown_subject() -> None:
     assert response.status_code == 400
 
 
-def test_extractive_notes_include_curriculum_alignment() -> None:
+def test_extractive_notes_include_curriculum_alignment(store: Storage, school_session) -> None:
+    school_session(client,store,"teacher","faculty")
     response = client.post(
         "/api/notes",
         json={
@@ -77,7 +78,8 @@ def test_extractive_notes_include_curriculum_alignment() -> None:
     assert "Light - Reflection and Refraction" in body["markdown"]
 
 
-def test_notes_accept_lines_with_timestamps() -> None:
+def test_notes_accept_lines_with_timestamps(store: Storage, school_session) -> None:
+    school_session(client,store,"teacher","faculty")
     response = client.post(
         "/api/notes",
         json={
@@ -100,7 +102,8 @@ def test_notes_accept_lines_with_timestamps() -> None:
     assert any(point["start"] is not None for point in notes["points"])
 
 
-def test_notes_reject_unknown_subject() -> None:
+def test_notes_reject_unknown_subject(store: Storage, school_session) -> None:
+    school_session(client,store,"teacher","faculty")
     response = client.post(
         "/api/notes",
         json={"text": LIGHT_TEXT, "class_level": 10, "subject": "history", "use_llm": False},
@@ -108,12 +111,14 @@ def test_notes_reject_unknown_subject() -> None:
     assert response.status_code == 400
 
 
-def test_notes_reject_empty_transcript() -> None:
+def test_notes_reject_empty_transcript(store: Storage, school_session) -> None:
+    school_session(client,store,"teacher","faculty")
     response = client.post("/api/notes", json={"text": "   ", "use_llm": False})
     assert response.status_code == 400
 
 
-def test_upload_rejects_empty_file() -> None:
+def test_upload_rejects_empty_file(store: Storage, school_session) -> None:
+    school_session(client,store,"teacher","faculty")
     response = client.post(
         "/api/transcribe",
         files={"file": ("lecture.wav", b"", "audio/wav")},
@@ -138,7 +143,8 @@ def test_config_reports_retrieval_quiz_and_storage() -> None:
     assert body["storage"]["engine"] == "sqlite"
 
 
-def test_ask_falls_back_to_the_selected_demo(store: Storage) -> None:
+def test_ask_falls_back_to_the_selected_demo(store: Storage, school_session) -> None:
+    school_session(client,store,"student","api-student")
     response = client.post(
         "/api/ask",
         json={"question": "What is reflection?", "class_level": 10, "subject": "science"},
@@ -153,7 +159,8 @@ def test_ask_falls_back_to_the_selected_demo(store: Storage) -> None:
     assert body["course"] == "Class 10 Science"
 
 
-def test_ask_refuses_an_ungrounded_question(store: Storage) -> None:
+def test_ask_refuses_an_ungrounded_question(store: Storage, school_session) -> None:
+    school_session(client,store,"student","api-student")
     response = client.post(
         "/api/ask",
         json={
@@ -169,7 +176,8 @@ def test_ask_refuses_an_ungrounded_question(store: Storage) -> None:
     assert body["confidence"] == 0.0
 
 
-def test_quiz_flow_tracks_mastery_and_gaps(store: Storage) -> None:
+def test_quiz_flow_tracks_mastery_and_gaps(store: Storage, school_session) -> None:
+    school_session(client,store,"student","api-student")
     start = client.post(
         "/api/quiz/start",
         json={
@@ -220,7 +228,8 @@ def test_quiz_flow_tracks_mastery_and_gaps(store: Storage) -> None:
     assert gaps.json()["gaps"][0]["recommended_difficulty"] in {1, 2, 3}
 
 
-def test_quiz_rejects_an_out_of_order_answer(store: Storage) -> None:
+def test_quiz_rejects_an_out_of_order_answer(store: Storage, school_session) -> None:
+    school_session(client,store,"student","api-student")
     session = client.post(
         "/api/quiz/start",
         json={"student_id": "api-student-2", "class_level": 10, "subject": "maths"},
@@ -236,7 +245,8 @@ def test_quiz_rejects_an_out_of_order_answer(store: Storage) -> None:
     assert response.status_code == 400
 
 
-def test_quiz_start_rejects_ungrounded_text(store: Storage) -> None:
+def test_quiz_start_rejects_ungrounded_text(store: Storage, school_session) -> None:
+    school_session(client,store,"student","api-student")
     response = client.post(
         "/api/quiz/start",
         json={
@@ -249,7 +259,8 @@ def test_quiz_start_rejects_ungrounded_text(store: Storage) -> None:
     assert response.status_code == 400
 
 
-def test_session_persistence_and_ask_from_saved_session(store: Storage) -> None:
+def test_session_persistence_and_ask_from_saved_session(store: Storage, school_session) -> None:
+    school_session(client,store,"student","api-student")
     created = client.post(
         "/api/sessions",
         json={
@@ -296,7 +307,8 @@ def test_session_persistence_and_ask_from_saved_session(store: Storage) -> None:
     assert body["citations"][0]["source"] == "lecture"
 
 
-def test_session_and_ask_return_404_for_unknown_id(store: Storage) -> None:
+def test_session_and_ask_return_404_for_unknown_id(store: Storage, school_session) -> None:
+    school_session(client,store,"student","api-student")
     assert client.get("/api/sessions/does-not-exist").status_code == 404
     response = client.post(
         "/api/ask",
@@ -305,7 +317,8 @@ def test_session_and_ask_return_404_for_unknown_id(store: Storage) -> None:
     assert response.status_code == 404
 
 
-def test_remediation_lifecycle_and_feedback_loop(store: Storage) -> None:
+def test_remediation_lifecycle_and_feedback_loop(store: Storage, school_session) -> None:
+    school_session(client,store,"student","api-student")
     # 1. Generate remediation pack
     gen_res = client.post(
         "/api/remediation/generate",
@@ -342,9 +355,13 @@ def test_remediation_lifecycle_and_feedback_loop(store: Storage) -> None:
     assert "post_diagnosis" in ans_body
 
 
-def test_teacher_endpoints_and_overview(store: Storage) -> None:
+def test_teacher_endpoints_and_overview(store: Storage, school_session) -> None:
+    school_session(client,store,"teacher","faculty")
     # Seed attempt and student
-    store.save_mastery("student-teacher-test", "Reflection", attempts=3, correct=2, score=0.65)
+    school_session(client,store,"student","student-teacher-test")
+    quiz=client.post("/api/quiz/start",json={"subject":"maths","length":1}).json()
+    client.post("/api/quiz/answer",json={"quiz_id":quiz["quiz_id"],"question_id":quiz["question"]["id"],"answer_index":0}).raise_for_status()
+    school_session(client,store,"teacher","faculty")
     overview_res = client.get("/api/teacher/overview")
     assert overview_res.status_code == 200
     ov = overview_res.json()
