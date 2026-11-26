@@ -6,8 +6,10 @@ html,body,#root {height:auto;min-height:100%;overflow:visible}
 [data-theme="light"] {--bg-app:var(--paper);--bg-surface:#fffefa;--bg-surface-subtle:#f0f3ee;--text-primary:var(--ink);--text-secondary:#49616a;--text-muted:#51676e;--border-default:var(--rule);--accent:var(--teal);--accent-text:#145f59;--accent-subtle:#e2eee8}
 .academic-shell {display:grid;grid-template-columns:clamp(178px,17vw,222px) minmax(0,1fr);min-height:100vh;background:var(--bg-app);color:var(--text-primary);font:15px/1.55 system-ui,sans-serif}
 .academic-rail {position:sticky;top:0;align-self:start;height:100dvh;overflow:auto;display:flex;flex-direction:column;background:#193a45;color:#fff;padding:24px 13px}
+[data-theme="dark"] .academic-rail {background:#080f0c;border-right:1px solid var(--border-subtle)}
 .school-brand,.school.entry>header {display:flex;align-items:center;gap:12px}
 .school-brand {padding:0 8px 24px;border-bottom:1px solid #537078}
+[data-theme="dark"] .school-brand {border-bottom-color:var(--border-default)}
 .school-brand strong,.entry header strong {display:block;font:600 1.6rem/1.1 var(--reading);letter-spacing:.04em}
 .school-brand small {color:#c8dad6;font-size:.8rem}
 .school-mark {display:inline-grid;place-items:center;width:42px;height:42px;border:1px solid #819d98;border-radius:6px;color:#e7eee4}
@@ -15,8 +17,11 @@ html,body,#root {height:auto;min-height:100%;overflow:visible}
 .rail-body nav {display:grid;gap:4px;padding-top:22px}
 .rail-body button,.menu-toggle {display:block;text-align:left;width:100%;background:transparent;color:#e4eeea;border:0;padding:11px 13px;font:500 .94rem/1.35 system-ui;border-radius:4px;cursor:pointer}
 .rail-body nav button:hover,.rail-footer button:hover {background:#284d56}
+[data-theme="dark"] .rail-body nav button:hover,[data-theme="dark"] .rail-footer button:hover {background:#13221c}
 .rail-body nav button[aria-current=page] {background:#dcece4;color:#173e40;box-shadow:inset 3px 0 #79afa0}
+[data-theme="dark"] .rail-body nav button[aria-current=page] {background:rgba(34,160,137,.18);color:#99f6e4;box-shadow:inset 3px 0 #2dd4bf}
 .rail-footer {margin-top:auto;border-top:1px solid #537078;padding-top:12px}
+[data-theme="dark"] .rail-footer {border-top-color:var(--border-default)}
 .menu-toggle {display:none}
 .academic-main,.learning-content,.learning-content>* {min-width:0}
 .academic-mast {display:flex;justify-content:space-between;align-items:center;gap:16px;min-height:61px;padding:10px clamp(16px,3vw,46px);border-bottom:1px solid var(--border-default);background:var(--bg-surface)}
@@ -29,7 +34,7 @@ html,body,#root {height:auto;min-height:100%;overflow:visible}
 .learning-content :is(.dashboard-card,.selected-class-card,.tab-pane-card,.library-filter-panel,.form-grid,.studio-step-body) {border-radius:6px;box-shadow:none}
 .learning-content :is(.teacher-hero-banner,.student-welcome-banner,.lesson-hero-card,.class-card-hero) {background:var(--bg-surface-subtle);color:var(--text-primary);border:0;border-left:3px solid var(--accent);border-radius:0;padding:18px}
 .learning-content :is(.teacher-hero-banner,.student-welcome-banner,.lesson-hero-card,.class-card-hero) :is(h1,h2,h3,p,span) {color:inherit}
-.page-intro {padding:0 0 18px;background:transparent;color:inherit;display:block;border-bottom:1px solid var(--rule)}
+.page-intro {padding:0 0 18px;background:transparent;color:inherit;display:block;border-bottom:1px solid var(--border-default)}
 .school .page-intro h1 {margin:0 0 6px}
 .school-office {min-height:0;background:transparent;color:inherit;font:inherit}
 .school-office dl {display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:12px;margin:22px 0;border-bottom:1px solid var(--border-default);padding-bottom:18px}
@@ -41,25 +46,28 @@ html,body,#root {height:auto;min-height:100%;overflow:visible}
 .school-office form button {justify-self:start}
 .school [role=status]:empty,.school [role=alert]:empty {display:none}
 .school [role=alert] {color:#ae3425}
-.school.entry {background:#f8f7f1}
+.school.entry {background:var(--bg-app)}
 .school.entry>header {justify-content:start;background:#193a45;padding:.8rem clamp(16px,4vw,56px)}
+[data-theme="dark"] .school.entry>header {background:#080f0c;border-bottom:1px solid var(--border-subtle)}
 .entry header span:last-child {border-left:1px solid #68838a;padding-left:14px;font-size:.88rem}
 .school.entry section {max-width:550px;margin:clamp(12px,5vh,54px) auto;padding:24px;overflow:visible}
-.school.entry form {background:#fffefa;color:#193747}
+.school.entry form {background:var(--bg-surface);color:var(--text-primary)}
 .school.entry nav {justify-content:space-between;margin-bottom:1.6rem}
 .school.entry form>button {justify-self:stretch}
 .academic-shell :is(input:not([type=checkbox]):not([type=radio]),select,textarea),.school :is(input,select,textarea) {min-width:0;max-width:100%;min-height:42px;font:inherit;color:var(--text-primary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:4px;padding:.55rem .7rem}
+.academic-shell .input-with-icon .form-input,.academic-shell .chapter-search-box input {min-height:40px;height:40px;padding:6px 12px 6px 36px;font-size:.84rem;background:var(--bg-surface)}
 .school label {font-size:.91rem;line-height:1.4}
 .school label input,.school label select,.password-field {width:100%}
 .password-field {display:flex;align-items:stretch}
 .password-field input {flex:1;min-width:0}
-.school .password-field button {background:#e7eee8;color:#25534e;font-size:.82rem;border:1px solid #aabcb4;margin-left:4px}
+.school .password-field button {background:var(--bg-surface-subtle);color:var(--accent-text);font-size:.82rem;border:1px solid var(--border-default);margin-left:4px}
 .academic-dialog.school {position:fixed;inset:0;margin:auto;width:min(94vw,420px);height:fit-content;min-height:0;max-height:90dvh;overflow:auto;border:0;border-radius:6px;color:var(--text-primary);background:var(--bg-surface);padding:0}
 .academic-dialog::backdrop {background:#112a38a3}
 .academic-dialog form {margin:0}
-.skip-link {position:absolute;left:8px;top:-80px;z-index:20}.skip-link:focus {top:8px;background:white;padding:10px}
+.skip-link {position:absolute;left:8px;top:-80px;z-index:20}.skip-link:focus {top:8px;background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--accent);padding:10px}
 .academic-shell :focus-visible,.school :focus-visible {outline:3px solid #4a92bb;outline-offset:2px}
 .learning-content table {display:block;max-width:100%;overflow-x:auto;border-collapse:collapse}
+.learning-content .analytics-table,.learning-content .timetable-table {display:table;width:100%}
 .learning-content table :is(th,td) {padding:.7rem .9rem;text-align:left}
 .learning-content table th {background:var(--bg-surface-subtle);font-size:.84rem}
 .learning-content .ask-ila-workspace,.learning-content .chat-messages-scroll-area {height:auto;max-height:none;overflow:visible}

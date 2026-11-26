@@ -1,6 +1,7 @@
 import {LoadingState,EmptyState} from "../../../shared/components/AcademicUI";
 import { useEffect, useState } from "react";
 import { getTeacherOverview,getTeacherLessons } from "../../../api";
+import { subscribeRealtime } from "../../../realtime";
 import { messageOf } from "../../../format";
 import type {
   AuthUser,LessonSummary,
@@ -48,22 +49,30 @@ export function TeacherOverview({
 
   useEffect(() => {
     let isMounted = true;
-    setLoading(true);
-    Promise.all([getTeacherOverview(),getTeacherLessons({status:"published"})])
-      .then(([res,lessons]) => {
-        if (isMounted) {
-          setData(res);setRecentLessons(lessons.slice(0,4));
-          setError(null);
-        }
-      })
-      .catch((err) => {
-        if (isMounted) setError(messageOf(err));
-      })
-      .finally(() => {
-        if (isMounted) setLoading(false);
-      });
+    const loadOverview = (silent = false) => {
+      if (!silent) setLoading(true);
+      Promise.all([getTeacherOverview(),getTeacherLessons({status:"published"})])
+        .then(([res,lessons]) => {
+          if (isMounted) {
+            setData(res);setRecentLessons(lessons.slice(0,4));
+            setError(null);
+          }
+        })
+        .catch((err) => {
+          if (isMounted && !silent) setError(messageOf(err));
+        })
+        .finally(() => {
+          if (isMounted && !silent) setLoading(false);
+        });
+    };
+    loadOverview(false);
+    const unsub = subscribeRealtime(
+      ["student_activity", "quiz_updated", "lesson_published", "lesson_updated", "lesson_archived"],
+      () => loadOverview(true),
+    );
     return () => {
       isMounted = false;
+      unsub();
     };
   }, []);
 

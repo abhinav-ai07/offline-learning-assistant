@@ -32,7 +32,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ila.curriculum import Chapter, Course, get_course, match_chapters
+from ila.curriculum import (
+    SUBJECT_BROAD_TOPICS,
+    Chapter,
+    Course,
+    get_course,
+    match_chapters,
+    subject_topic_overview,
+)
 from ila.notes import TranscriptLine
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -52,6 +59,13 @@ _ANSWER_NOISE = re.compile(
     re.IGNORECASE,
 )
 _CONDITIONAL = re.compile(r"^(?:if|when|whenever|suppose|assume|unless)\b", re.IGNORECASE)
+_OFF_TOPIC_PATTERNS = re.compile(
+    r"\b(?:world\s+cup|cricket|ipl|fifa|football|soccer|tennis|badminton|nba|nfl|"
+    r"bollywood|hollywood|actor|actress|celebrity|movie\s+cast|box\s+office|"
+    r"weather\s+today|forecast|stock\s+price|bitcoin|crypto|cryptocurrency|"
+    r"minecraft|fortnite|video\s+game|recipe|cooking|celebrity)\b",
+    re.IGNORECASE,
+)
 
 STOPWORDS = frozenset(
     """
@@ -599,6 +613,7 @@ class AnswerEngine:
     ) -> Answer:
         started = time.perf_counter()
         question = question.strip()
+        chapter = chapter if chapter is not None and chapter > 0 else None
         if not question:
             return Answer(
                 question=question,
@@ -638,6 +653,12 @@ class AnswerEngine:
                     content_only=True,
                     chapter=chapter,
                 )
+
+        if not retrieved and self.min_score <= 0.3 and use_llm and self.llm is not None:
+            broad = self._ask_broad_subject(question, chapter=chapter, started=started)
+            if broad is not None:
+                return broad
+
         if not retrieved:
             return Answer(
                 question=question,
@@ -673,6 +694,84 @@ class AnswerEngine:
             citations=citations,
             topics=topics,
             engine=engine,
+            latency_s=time.perf_counter() - started,
+        )
+
+    def _ask_broad_subject(
+        self,
+        question: str,
+        *,
+        chapter: int | None,
+        started: float,
+    ) -> Answer | None:
+        """Answer using broad curriculum/subject knowledge when no verbatim passage exists."""
+        if self.llm is None or not getattr(self.llm, "available", False):
+            return None
+        course = self.knowledge.course
+        syllabus_hits = self.knowledge.search(
+            question,
+            top_k=3,
+            min_score=0.06,
+            content_only=False,
+            chapter=chapter,
+        )
+        if not syllabus_hits and chapter is not None:
+            # If the user asked a general subject concept while a chapter was selected,
+            # allow matching another syllabus chapter in the same subject.
+            syllabus_hits = self.knowledge.search(
+                question,
+                top_k=3,
+                min_score=0.10,
+                content_only=False,
+                chapter=None,
+            )
+
+        if _is_off_topic_query(question, course, syllabus_hits):
+            return None
+
+        reply = _broad_subject_llm_answer(
+            self.llm,
+            question,
+            course=course,
+            syllabus_hits=syllabus_hits,
+            chapter=chapter,
+        )
+        if not reply:
+            return None
+
+        if syllabus_hits:
+            citations = tuple(item.citation() for item in syllabus_hits[:3])
+            topics = _topics(syllabus_hits, self.knowledge)
+            confidence = round(min(0.84, max(0.68, _confidence(syllabus_hits[0].score, len(syllabus_hits)))), 3)
+        else:
+            label = course.label if course else "General Curriculum"
+            citations = (
+                {
+                    "id": f"subject-{course.subject if course else 'general'}",
+                    "source": "syllabus",
+                    "title": f"{label} · Broad Subject Knowledge",
+                    "chapter_number": None,
+                    "chapter_title": None,
+                    "start": None,
+                    "end": None,
+                    "score": 0.68,
+                    "snippet": (
+                        f"Answered from verified {label} foundational subject knowledge "
+                        "(no specific textbook excerpt matched verbatim)."
+                    ),
+                },
+            )
+            topics = ()
+            confidence = 0.68
+
+        return Answer(
+            question=question,
+            answer=reply,
+            answerable=True,
+            confidence=confidence,
+            citations=citations,
+            topics=topics,
+            engine="llm+syllabus",
             latency_s=time.perf_counter() - started,
         )
 
@@ -947,3 +1046,138 @@ def _llm_answer(
         return reply
 
     return None
+
+
+_GENERIC_OVERLAP_WORDS = frozenset({"world", "life", "work", "match", "game", "play", "part", "form", "way"})
+
+
+def _is_off_topic_query(
+    question: str,
+    course: Course | None,
+    syllabus_hits: Sequence[RetrievedPassage],
+) -> bool:
+    """Reject clearly non-academic trivia or off-topic queries before calling the LLM."""
+    q_terms = content_terms(question)
+    if not q_terms:
+        return True
+
+    # If it matches obvious non-school entertainment/sports/news topics, refuse unless
+    # there are at least 2 distinct specific curriculum keyword matches.
+    if _OFF_TOPIC_PATTERNS.search(question):
+        specific_q = q_terms - _GENERIC_OVERLAP_WORDS
+        hit_terms = content_terms(" ".join(hit.passage.text for hit in syllabus_hits))
+        if len(specific_q & hit_terms) < 2:
+            return True
+    return False
+
+
+_REFUSAL_PREFIXES = (
+    "out_of_scope",
+    "out of scope",
+    "i cannot answer",
+    "sorry, i can only",
+)
+_SHORT_REFUSAL_MARKERS = (
+    "outside the scope",
+    "not related to",
+    "unrelated to",
+    "cannot answer this",
+    "i do not have enough information",
+    "not part of",
+)
+
+
+def _broad_subject_llm_answer(
+    llm: LlmProvider,
+    question: str,
+    *,
+    course: Course | None,
+    syllabus_hits: Sequence[RetrievedPassage],
+    chapter: int | None,
+) -> str | None:
+    """Answer general subject-topic questions with strict anti-hallucination guardrails."""
+    subject_label = course.label if course else "NCERT School Curriculum"
+    subject_code = course.subject if course else ""
+    overview = subject_topic_overview(course) if course else ""
+    matched_lines = "\n".join(
+        f"- {hit.passage.title}: {hit.passage.text}" for hit in syllabus_hits[:3]
+    )
+    chapter_focus = ""
+    if chapter is not None and course is not None:
+        ch_obj = course.chapter(chapter)
+        if ch_obj is not None:
+            chapter_focus = f"\nSelected Chapter Focus: Chapter {ch_obj.number}: {ch_obj.title}."
+
+    # Check if curriculum or broad topic keywords already confirm the question is in scope
+    q_terms = content_terms(question)
+    broad_terms = content_terms(" ".join(SUBJECT_BROAD_TOPICS.get(subject_code, ())))
+    confirmed_in_subject = bool(syllabus_hits) or bool(q_terms & broad_terms)
+
+    formula_rule = (
+        "3. Structure & Clarity: Answer concisely (under 180 words) using clear bullet points or short "
+        "paragraphs. Include the standard definition, key formulas/laws in `$...$` notation where applicable, "
+        "and a brief example. Finish your final sentence cleanly."
+        if subject_code in {"science", "maths", "physics", "chemistry", "biology", ""}
+        else "3. Structure & Clarity: Answer concisely (under 180 words) using clear bullet points or short "
+        "paragraphs. Give the definition/concept, key rules or context, and 1-2 concrete examples. "
+        "Finish your final sentence cleanly."
+    )
+
+    if confirmed_in_subject:
+        system_prompt = (
+            f"You are an accurate, conservative {subject_label} academic tutor.\n"
+            "The student asked an academic question within this subject. Provide a clear, accurate "
+            "explanation based on standard school/NCERT knowledge.\n\n"
+            "ANTI-HALLUCINATION RULES:\n"
+            "1. Only state well-established, verified facts, definitions, formulas, and rules.\n"
+            "2. NEVER invent textbook page numbers, quotes, fake experiments, or uncertain statistics.\n"
+            f"{formula_rule}"
+        )
+        closing_instruction = "Provide a clear, accurate explanation.\nAnswer:"
+    else:
+        system_prompt = (
+            f"You are an accurate, conservative {subject_label} academic tutor.\n"
+            "First check whether the question belongs to school academics for this subject.\n\n"
+            "STRICT ANTI-HALLUCINATION RULES:\n"
+            f"1. Scope Check: If the question is clearly NOT about {subject_label} (for example sports, "
+            "cricket, movies, celebrities, real-time news, weather, video games, or non-academic trivia), "
+            "reply ONLY with: OUT_OF_SCOPE\n"
+            "2. Only state well-established, verified facts, definitions, formulas, and rules. Never "
+            "invent fake citations, page numbers, or facts you are uncertain about.\n"
+            f"{formula_rule}"
+        )
+        closing_instruction = (
+            "Reply OUT_OF_SCOPE if non-academic/off-topic; otherwise give a clear, accurate explanation.\n"
+            "Answer:"
+        )
+
+    context_parts = [f"Subject Broad Map:\n{overview}"]
+    if chapter_focus:
+        context_parts.append(chapter_focus.strip())
+    if matched_lines:
+        context_parts.append(f"Closest Syllabus Topics:\n{matched_lines}")
+
+    user_prompt = "\n\n".join(context_parts) + f"\n\nStudent Question: {question}\n\n{closing_instruction}"
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    try:
+        reply = llm.complete(messages, max_tokens=520, temperature=0.1).strip()
+    except Exception:
+        logger.debug("Broad-subject LLM Q&A generation failed", exc_info=True)
+        return None
+
+    if not reply or len(reply) < 25:
+        return None
+    lowered = reply.lower().strip()
+    if lowered.startswith(_REFUSAL_PREFIXES):
+        return None
+    if len(lowered) < 160 and any(marker in lowered for marker in _SHORT_REFUSAL_MARKERS):
+        return None
+
+    cleaned = _clean_llm_reply(reply)
+    if not cleaned or len(cleaned) < 25:
+        return None
+    return cleaned

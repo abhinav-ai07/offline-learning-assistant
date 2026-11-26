@@ -338,10 +338,23 @@ export function PracticeQuizzesView({ user,lesson }: PracticeQuizzesViewProps) {
                   value={launchSubject}
                   onChange={(e) => setLaunchSubject(e.target.value)}
                 >
-                  
                   {subjects.map(s=><option key={s.code} value={s.code}>{s.name}</option>)}
-                </select>{lesson?<p>{lesson.title}</p>:<label>Chapter number (optional)<input type="number" min="1" value={chapter||""} onChange={e=>setChapter(Number(e.target.value)||undefined)}/></label>}
+                </select>
+                {lesson && <p>{lesson.title}</p>}
               </div>
+
+              {!lesson && (
+                <div className="form-group">
+                  <label>Chapter number (optional)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="All chapters"
+                    value={chapter || ""}
+                    onChange={(e) => setChapter(Number(e.target.value) || undefined)}
+                  />
+                </div>
+              )}
 
               <div className="form-group">
                 <label>Topic / Concept (Optional)</label>
@@ -508,14 +521,16 @@ export function PracticeQuizzesView({ user,lesson }: PracticeQuizzesViewProps) {
                   <div key={idx} className="revision-topic-card">
                     <div className="rev-header">
                       <h4>{item.topic}</h4>
-                      <span className="rev-score">{Math.round(item.score * 100)}% Mastery</span>
+                      <span className={`rev-score ${item.score < 0.5 ? "is-low" : ""}`}>
+                        {Math.round(item.score * 100)}% Mastery
+                      </span>
                     </div>
                     <div className="topic-progress-bar">
                       <div
                         className="progress-fill"
                         style={{
                           width: `${Math.round(item.score * 100)}%`,
-                          backgroundColor: item.score < 0.5 ? "var(--color-danger)" : "var(--color-warning)",
+                          backgroundColor: item.score < 0.5 ? "var(--danger)" : "var(--warning)",
                         }}
                       />
                     </div>

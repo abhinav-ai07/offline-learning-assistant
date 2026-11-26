@@ -1,7 +1,8 @@
 import {PortalShell} from "../components/AcademicUI";
 import { AccountPassword } from "../../School";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import type { AppNotification, AuthUser } from "../../types";
+import { subscribeRealtime } from "../../realtime";
 import {
   AwardIcon,
   BarChartIcon,
@@ -20,7 +21,7 @@ import {
 import { Breadcrumbs, type BreadcrumbItem } from "../components/Breadcrumbs";
 import { markNotificationRead } from "../../api";
 
-export type StudentNavSection = "overview" | "subjects" | "ask" | "practice" | "progress";
+export type StudentNavSection = "overview" | "subjects" | "transcribe" | "ask" | "practice" | "progress";
 
 interface StudentLayoutProps {
   user: AuthUser;
@@ -53,6 +54,13 @@ export function StudentLayout({
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
+  useEffect(() => {
+    return subscribeRealtime(
+      ["lesson_published", "lesson_updated", "lesson_archived"],
+      () => onRefreshNotifications(),
+    );
+  }, [onRefreshNotifications]);
+
   const handleNotificationClick = async (notif: AppNotification) => {
     if (!notif.is_read) {
       try {
@@ -72,7 +80,7 @@ export function StudentLayout({
   };
 
   return <PortalShell portal="Student" name={user.full_name} active={currentSection} navigate={onNavigate}
-    items={[[ "overview","Overview"],["subjects","My Subjects"],["ask","Ask ILA"],["practice","Adaptive Quizzes"],["progress","My Progress"]]}
+    items={[[ "overview","Overview"],["subjects","My Subjects"],["transcribe","Audio Transcripts"],["ask","Ask ILA"],["practice","Adaptive Quizzes"],["progress","My Progress"]]}
     footer={<><AccountPassword logout={onLogout}/><button onClick={onLogout}>Sign out</button></>}
     tools={<>            <div className="notification-dropdown-wrapper">
               <button

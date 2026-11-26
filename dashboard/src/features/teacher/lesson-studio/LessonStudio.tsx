@@ -1,6 +1,4 @@
 import { useEffect, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   createNotes,
   createTeacherLesson,
@@ -27,6 +25,7 @@ import {
   WarningIcon,
 } from "../../../components/icons";
 import { AudioRecorder } from "../../../shared/components/AudioRecorder";
+import { MathMarkdown } from "../../../shared/components/MathMarkdown";
 
 interface LessonStudioProps {
   user: AuthUser;
@@ -119,12 +118,16 @@ export function LessonStudio({
   };
 
   // Step 2: Handle Browser Recording Complete
-  const handleRecordingComplete = (file: File, durationSecs: number) => {
+  const handleRecordingComplete = (file: File, durationSecs: number, liveLines?: DemoLine[]) => {
     setSelectedAudioFile(file);
     setAudioDuration(durationSecs);
+    if (liveLines && liveLines.length > 0) {
+      setTranscriptLines(liveLines);
+      setTranscript(liveLines.map((l) => l.text).join(" "));
+    }
   };
 
-  // Step 3: Run Faster-Whisper Transcription
+  // Step 3: Run Faster-Whisper Transcription on uploaded/recorded file
   const handleRunTranscription = async () => {
     if (!selectedAudioFile) {
       setTranscribeError("Please select or record an audio file first.");
@@ -615,11 +618,9 @@ export function LessonStudio({
             {/* Right: Live Preview */}
             <div className="review-preview-pane">
               <label className="pane-label">Student View Preview</label>
-              <div className="preview-markdown-box markdown-body">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {notesMarkdown || "_No notes content._"}
-                </ReactMarkdown>
-              </div>
+              <MathMarkdown className="preview-markdown-box markdown-body">
+                {notesMarkdown || "_No notes content._"}
+              </MathMarkdown>
             </div>
           </div>
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getStudentSubjectsTree } from "../../../api";
+import { subscribeRealtime } from "../../../realtime";
 import { messageOf } from "../../../format";
 import type { AuthUser, LessonSummary, SubjectTree } from "../../../types";
 import {
@@ -10,15 +11,17 @@ import {
   FileTextIcon,
   FolderIcon,
   LayersIcon,
+  MicIcon,
   WarningIcon,
 } from "../../../components/icons";
 
 interface MySubjectsProps {
   user: AuthUser;
   onSelectLesson: (lessonId: string) => void;
+  onNavigateTranscribe?: () => void;
 }
 
-export function MySubjects({ user, onSelectLesson }: MySubjectsProps) {
+export function MySubjects({ user, onSelectLesson, onNavigateTranscribe }: MySubjectsProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [subjectsTree, setSubjectsTree] = useState<SubjectTree[]>([]);
@@ -27,29 +30,36 @@ export function MySubjects({ user, onSelectLesson }: MySubjectsProps) {
 
   useEffect(() => {
     let isMounted = true;
-    setLoading(true);
-    getStudentSubjectsTree()
-      .then((tree) => {
-        if (isMounted) {
-          setSubjectsTree(tree);
-          if (tree.length > 0 && !selectedSubject) {
-            setSelectedSubject(tree[0].subject_code);
-            // Expand first chapter by default
-            if (tree[0].chapters.length > 0) {
-              setExpandedChapters({ [tree[0].chapters[0].chapter_number]: true });
+    const loadTree = (silent = false) => {
+      if (!silent) setLoading(true);
+      getStudentSubjectsTree()
+        .then((tree) => {
+          if (isMounted) {
+            setSubjectsTree(tree);
+            if (!silent && tree.length > 0 && !selectedSubject) {
+              setSelectedSubject(tree[0].subject_code);
+              if (tree[0].chapters.length > 0) {
+                setExpandedChapters({ [tree[0].chapters[0].chapter_number]: true });
+              }
             }
+            setError(null);
           }
-          setError(null);
-        }
-      })
-      .catch((err) => {
-        if (isMounted) setError(messageOf(err));
-      })
-      .finally(() => {
-        if (isMounted) setLoading(false);
-      });
+        })
+        .catch((err) => {
+          if (isMounted && !silent) setError(messageOf(err));
+        })
+        .finally(() => {
+          if (isMounted && !silent) setLoading(false);
+        });
+    };
+    loadTree(false);
+    const unsub = subscribeRealtime(
+      ["lesson_published", "lesson_updated", "lesson_archived", "student_lesson_created", "student_activity"],
+      () => loadTree(true),
+    );
     return () => {
       isMounted = false;
+      unsub();
     };
   }, []);
 
@@ -93,6 +103,11 @@ export function MySubjects({ user, onSelectLesson }: MySubjectsProps) {
             Class {user.class_level}{user.section || "A"} · Academic Hierarchy: Class &rarr; Section &rarr; Subject &rarr; Chapter &rarr; Daily Lesson
           </p>
         </div>
+        {onNavigateTranscribe && (
+          <button type="button" className="btn btn-primary btn-sm" onClick={onNavigateTranscribe}>
+            <MicIcon width={14} height={14} /> Generate Notes from Audio
+          </button>
+        )}
       </div>
 
       {/* Subject Selection Tabs */}
@@ -199,13 +214,24 @@ export function MySubjects({ user, onSelectLesson }: MySubjectsProps) {
                                     <td className="lesson-name-cell">
                                       <div className="lesson-name-title">{lesson.title}</div>
                                       <div className="lesson-sub-info">
-                                        Published on {lesson.published_at ? new Date(lesson.published_at).toLocaleDateString() : lesson.teaching_date}
+                                        {lesson.is_student_generated || lesson.status === "student_private"
+                                          ? `Added on ${lesson.teaching_date} (Self-Study)`
+                                          : `Published on ${lesson.published_at ? new Date(lesson.published_at).toLocaleDateString() : lesson.teaching_date}`}
                                       </div>
                                     </td>
                                     <td className="lesson-date-cell">{lesson.teaching_date}</td>
-                                    <td className="lesson-teacher-cell">{lesson.teacher_name || "Faculty"}</td>
+                                    <td className="lesson-teacher-cell">
+                                      {lesson.is_student_generated || lesson.status === "student_private"
+                                        ? "You (Self-Study)"
+                                        : (lesson.teacher_name || "Faculty")}
+                                    </td>
                                     <td>
                                       <div className="material-badges-row">
+                                        {(lesson.is_student_generated || lesson.status === "student_private") && (
+                                          <span className="badge-micro badge-self-study" title="Auto-sorted self-study audio notes">
+                                            Self-Study
+                                          </span>
+                                        )}
                                         {lesson.has_transcript && (
                                           <span className="badge-micro badge-transcript" title="Classroom transcript available">
                                             Transcript

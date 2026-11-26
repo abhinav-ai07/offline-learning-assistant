@@ -1,6 +1,7 @@
 import { Administration, PortalLogin } from "../School";
 import { useCallback, useEffect, useState } from "react";
 import { getMe, getStudentNotifications, logout } from "../api";
+import { useRealtimeConnection } from "../realtime";
 import type { AppNotification, AuthUser, LessonDetail } from "../types";
 import type { BreadcrumbItem } from "../shared/components/Breadcrumbs";
 import { StudentLayout, type StudentNavSection } from "../shared/layouts/StudentLayout";
@@ -9,6 +10,7 @@ import { ErrorBoundary } from "../components/ErrorBoundary";
 import { StudentOverview } from "../features/student/overview/StudentOverview";
 import { MySubjects } from "../features/student/subjects/MySubjects";
 import { StudentLessonView } from "../features/student/lessons/StudentLessonView";
+import { StudentTranscriptView } from "../features/student/transcript/StudentTranscriptView";
 import { AskIlaView } from "../features/student/ask-ila/AskIlaView";
 import { PracticeQuizzesView } from "../features/student/practice/PracticeQuizzesView";
 import { StudentProgressView } from "../components/StudentProgressView";
@@ -47,6 +49,8 @@ export function AppRouter() {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("ila_theme", theme);
   }, [theme]);
+
+  useRealtimeConnection(Boolean(user));
 
   const toggleTheme = () => {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
@@ -103,6 +107,7 @@ export function AppRouter() {
     if (!user) return;
     if (user.role === "student") {
       if (currentPath.includes("/student/subjects")) setStudentSection("subjects");
+      else if (currentPath.includes("/student/transcribe")) setStudentSection("transcribe");
       else if (currentPath.includes("/student/ask")) setStudentSection("ask");
       else if (currentPath.includes("/student/practice")) setStudentSection("practice");
       else if (currentPath.includes("/student/progress")) setStudentSection("progress");
@@ -184,6 +189,8 @@ export function AppRouter() {
       if (activeLessonId) {
         breadcrumbItems.push({ label: "Classroom Lesson", active: true });
       }
+    } else if (studentSection === "transcribe") {
+      breadcrumbItems.push({ label: "Audio Transcripts", active: true });
     } else if (studentSection === "ask") {
       breadcrumbItems.push({ label: "Ask ILA", active: true });
     } else if (studentSection === "practice") {
@@ -224,6 +231,10 @@ export function AppRouter() {
                 setStudentSection("subjects");
                 navigateTo("/student/subjects");
               }}
+              onNavigateTranscribe={() => {
+                setStudentSection("transcribe");
+                navigateTo("/student/transcribe");
+              }}
               onNavigatePractice={() => {
                 setStudentSection("practice");
                 navigateTo("/student/practice");
@@ -255,8 +266,28 @@ export function AppRouter() {
               <MySubjects
                 user={user}
                 onSelectLesson={(lessonId) => setActiveLessonId(lessonId)}
+                onNavigateTranscribe={() => {
+                  setStudentSection("transcribe");
+                  navigateTo("/student/transcribe");
+                }}
               />
             )
+          )}
+
+          {studentSection === "transcribe" && (
+            <StudentTranscriptView
+              user={user}
+              onOpenLesson={(lessonId) => {
+                setActiveLessonId(lessonId);
+                setStudentSection("subjects");
+                navigateTo("/student/subjects");
+              }}
+              onNavigateSubjects={() => {
+                setActiveLessonId(null);
+                setStudentSection("subjects");
+                navigateTo("/student/subjects");
+              }}
+            />
           )}
 
           {studentSection === "ask" && (

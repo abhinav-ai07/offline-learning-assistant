@@ -48,7 +48,19 @@ _NOISE = re.compile(
     re.IGNORECASE,
 )
 _BAD_TERM_START = frozenset(
-    {"if", "when", "where", "which", "that", "this", "there", "we", "you", "students", "today"}
+    {
+        "if", "when", "where", "which", "that", "this", "these", "those",
+        "it", "they", "there", "here", "such", "we", "you", "students", "today",
+    }
+)
+_DANGLING_START = re.compile(
+    r"^(?:this|that|these|those|it|they|them|their|such|here|there|"
+    r"hence|thus|therefore|however|meanwhile|similarly|for example|in fact|as a result)\b",
+    re.IGNORECASE,
+)
+_CHITCHAT_START = (
+    "today we", "in this", "let us", "good morning", "good afternoon",
+    "welcome", "remember that", "as we saw", "in the next",
 )
 _BAD_TERM_WORDS = frozenset(
     {"if", "when", "where", "which", "because", "then", "so", "but", "and", "or"}
@@ -259,9 +271,12 @@ def _choose_distractors(
     count: int = 3,
 ) -> list[str]:
     correct_key = correct.lower().strip()
-    candidates: list[str] = []
     seen: set[str] = {correct_key}
+    rng = random.Random(question_id)
+    chosen: list[str] = []
+
     for pool in (same_chapter, global_pool):
+        pool_candidates: list[str] = []
         for value in pool:
             key = value.lower().strip()
             if not key or key in seen:
@@ -269,10 +284,14 @@ def _choose_distractors(
             if key in correct_key or correct_key in key:
                 continue
             seen.add(key)
-            candidates.append(value)
-    rng = random.Random(question_id)
-    rng.shuffle(candidates)
-    return candidates[:count]
+            pool_candidates.append(value)
+        rng.shuffle(pool_candidates)
+        needed = count - len(chosen)
+        chosen.extend(pool_candidates[:needed])
+        if len(chosen) >= count:
+            break
+
+    return chosen[:count]
 
 
 def _mcq_options(
@@ -317,10 +336,10 @@ def _definition_questions(
                 difficulty=2,
                 explanation=(
                     f"**Concept:** {item.term}\n\n"
-                    f"**NCERT Definition:** {item.body}.\n\n"
-                    f"**Why this is correct:** In Class 10 {item.passage.chapter_title or item.topic}, "
+                    f"**Syllabus Definition:** {item.body}.\n\n"
+                    f"**Why this is correct:** In {item.passage.chapter_title or item.topic}, "
                     f"'{item.term}' is formally defined by this exact condition. "
-                    f"Mastering this relationship is essential for proving theorems and solving application problems."
+                    f"Mastering this relationship is essential for conceptual clarity and problem solving."
                 ),
                 source=item.passage.source,
                 chapter_number=item.passage.chapter_number,
@@ -396,29 +415,59 @@ def _cloze_questions(
             continue
         if sources is not None and passage.source not in sources:
             continue
-        pool = by_chapter.get(passage.chapter_number or -1, [])
-        keywords = list(dict.fromkeys([*pool, *global_pool]))
-        for sentence in _SENTENCE_END.split(passage.text):
-            sentence = _SPACE.sub(" ", sentence).strip()
-            if len(sentence) < 28 or len(sentence) > 420:
+        sentences = [
+            _SPACE.sub(" ", s).strip()
+            for s in _SENTENCE_END.split(passage.text)
+            if _SPACE.sub(" ", s).strip()
+        ]
+        for idx, sentence in enumerate(sentences):
+            if len(sentence) < 24 or len(sentence) > 420:
                 continue
-            if _NOISE.search(sentence) or sentence.lower().startswith(("today we", "in this")):
+            if _NOISE.search(sentence) or sentence.lower().startswith(_CHITCHAT_START):
                 continue
             if _GREEK.search(sentence):
                 continue
+
+            is_dangling = bool(_DANGLING_START.match(sentence))
+            prev_sentence = sentences[idx - 1] if idx > 0 else ""
+            if is_dangling:
+                if (
+                    not prev_sentence
+                    or len(prev_sentence) < 24
+                    or len(prev_sentence) > 220
+                    or _NOISE.search(prev_sentence)
+                    or prev_sentence.lower().startswith(_CHITCHAT_START)
+                ):
+                    continue
+                context_text = f"{prev_sentence} {sentence}"
+            else:
+                if len(sentence) < 42 or len(sentence.split()) < 7:
+                    continue
+                context_text = sentence
+
+            topic, chapter_number, chapter_title = _sentence_topic(
+                context_text, passage, knowledge.course
+            )
+            same = list(by_chapter.get(chapter_number or -1, []))
+            keywords = list(dict.fromkeys([*same, *global_pool]))
             found = _find_keyword(sentence, keywords)
             if not found:
                 continue
             keyword, match = found
             answer = match.group(0)
+
+            # Never prepend a previous sentence that already leaks the target answer.
+            if is_dangling and re.search(rf"\b{re.escape(answer)}\b", prev_sentence, re.IGNORECASE):
+                continue
+
             blanked = sentence[: match.start()] + "______" + sentence[match.end() :]
-            prompt = f"Complete the statement: {blanked}"
+            statement = f"{prev_sentence} {blanked}" if is_dangling else blanked
+            prompt = f"Complete the statement: {statement}"
             if prompt.lower() in seen_prompts:
                 continue
             seen_prompts.add(prompt.lower())
             identifier = _question_id("mcq", prompt, answer)
             # Prefer same-chapter distractors, then the rest of the course.
-            same = list(by_chapter.get(passage.chapter_number or -1, []))
             distractors = _choose_distractors(
                 answer,
                 question_id=identifier,
@@ -428,9 +477,6 @@ def _cloze_questions(
             if len(distractors) < 3:
                 continue
             options, index = _mcq_options(answer, distractors, question_id=identifier)
-            topic, chapter_number, chapter_title = _sentence_topic(
-                sentence, passage, knowledge.course
-            )
             bank.append(
                 QuizQuestion(
                     id=identifier,
@@ -438,11 +484,11 @@ def _cloze_questions(
                     prompt=prompt,
                     answer=answer,
                     topic=topic,
-                    difficulty=1 if len(sentence) < 160 else 2,
+                    difficulty=1 if len(statement) < 160 else 2,
                     explanation=(
                         f"**Key Term:** {answer}\n\n"
-                        f"**NCERT Textbook Statement:** \"{sentence}\"\n\n"
-                        f"**Why this is correct:** The term '{answer}' completes the foundational rule according to the NCERT {chapter_title or topic} textbook."
+                        f"**Grounded Statement:** \"{context_text}\"\n\n"
+                        f"**Why this is correct:** The term '{answer}' completes the concept from {chapter_title or topic}."
                     ),
                     source=passage.source,
                     chapter_number=chapter_number,

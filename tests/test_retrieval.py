@@ -158,6 +158,36 @@ def test_llm_answer_solves_new_question_with_textbook_techniques() -> None:
     assert retrieved, "Should retrieve relevant NCERT chapter passages"
     answer = _llm_answer(MockLLM(), "Solve 2x^2 - 7x + 3 = 0 using quadratic formula", retrieved)
     assert answer is not None
+
+
+def test_broad_subject_qa_answers_in_scope_without_verbatim_textbook() -> None:
+    from dataclasses import dataclass
+
+    @dataclass
+    class MockBroadLLM:
+        available: bool = True
+
+        def complete(self, messages: list[dict[str, str]], **kwargs: object) -> str:
+            prompt = messages[-1]["content"]
+            if "cricket" in prompt.lower():
+                return "OUT_OF_SCOPE"
+            return (
+                "Resistance ($R$) is the opposition offered by a conductor to the flow of electric "
+                "current ($I$). By Ohm's law, $R = \\frac{V}{I}$, meaning resistance is inversely "
+                "proportional to current at a constant potential difference."
+            )
+
+    eng = engine("class10-science-light", llm=MockBroadLLM())
+    ans = eng.ask("what is resistance with respect to current", use_llm=True)
+    assert ans.answerable is True
+    assert ans.engine == "llm+syllabus"
+    assert ans.citations
+    assert ans.citations[0]["chapter_number"] == 11
+    assert "resistance" in ans.answer.lower()
+
+    refused = eng.ask("Who won the 2011 cricket World Cup?", use_llm=True)
+    assert refused.answerable is False
+    assert refused.citations == ()
     assert "quadratic formula" in answer
     assert "Step-by-Step Solution" in answer
     assert "x = 3" in answer

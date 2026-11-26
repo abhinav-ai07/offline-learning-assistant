@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getStudentOverview } from "../../../api";
+import { subscribeRealtime } from "../../../realtime";
 import { messageOf } from "../../../format";
 import type { AuthUser, LessonSummary, TimetableSlot } from "../../../types";
 import {
@@ -12,6 +13,7 @@ import {
   FileTextIcon,
   GraduationCapIcon,
   HelpCircleIcon,
+  MicIcon,
   PlayIcon,
   TrendingUpIcon,
   WarningIcon,
@@ -21,6 +23,7 @@ interface StudentOverviewProps {
   user: AuthUser;
   onOpenLesson: (lessonId: string) => void;
   onNavigateSubjects: () => void;
+  onNavigateTranscribe?: () => void;
   onNavigatePractice: () => void;
   onNavigateProgress: () => void;
 }
@@ -29,6 +32,7 @@ export function StudentOverview({
   user,
   onOpenLesson,
   onNavigateSubjects,
+  onNavigateTranscribe,
   onNavigatePractice,
   onNavigateProgress,
 }: StudentOverviewProps) {
@@ -39,22 +43,30 @@ export function StudentOverview({
 
   useEffect(() => {
     let isMounted = true;
-    setLoading(true);
-    getStudentOverview()
-      .then((data) => {
-        if (isMounted) {
-          setOverviewData(data);
-          setError(null);
-        }
-      })
-      .catch((err) => {
-        if (isMounted) setError(messageOf(err));
-      })
-      .finally(() => {
-        if (isMounted) setLoading(false);
-      });
+    const loadOverview = (silent = false) => {
+      if (!silent) setLoading(true);
+      getStudentOverview()
+        .then((data) => {
+          if (isMounted) {
+            setOverviewData(data);
+            setError(null);
+          }
+        })
+        .catch((err) => {
+          if (isMounted && !silent) setError(messageOf(err));
+        })
+        .finally(() => {
+          if (isMounted && !silent) setLoading(false);
+        });
+    };
+    loadOverview(false);
+    const unsub = subscribeRealtime(
+      ["lesson_published", "lesson_updated", "lesson_archived", "quiz_updated", "student_activity"],
+      () => loadOverview(true),
+    );
     return () => {
       isMounted = false;
+      unsub();
     };
   }, []);
 
@@ -101,6 +113,24 @@ export function StudentOverview({
           <p>
             Here is your daily classroom material, published lectures, and learning tasks for today.
           </p>
+          {onNavigateTranscribe && (
+            <div className="welcome-actions" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={onNavigateTranscribe}
+              >
+                <MicIcon width={14} height={14} /> Generate Transcript &amp; Notes from Audio
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                onClick={onNavigateSubjects}
+              >
+                <BookIcon width={14} height={14} /> Browse My Subjects
+              </button>
+            </div>
+          )}
         </div>
 
         {latestLesson && (
@@ -314,23 +344,31 @@ export function StudentOverview({
                     Targeted practice recommended based on your recent quiz responses:
                   </p>
                   <div className="weak-topic-list">
-                    {weakTopics.map((item: any, idx: number) => (
-                      <div key={idx} className="weak-topic-item">
-                        <div className="topic-header">
-                          <span className="topic-name">{item.topic}</span>
-                          <span className="topic-score">{Math.round(item.score * 100)}%</span>
+                    {weakTopics.map((item: any, idx: number) => {
+                      const pct = Math.round(item.score * 100);
+                      const isCritical = item.score < 0.5;
+                      const levelLabel = isCritical ? "Critical" : item.score < 0.65 ? "Needs Review" : "Developing";
+                      return (
+                        <div key={idx} className="weak-topic-item">
+                          <div className="topic-header">
+                            <span className="topic-name">{item.topic}</span>
+                            <div className={`topic-proficiency-box ${isCritical ? "is-critical" : "is-review"}`}>
+                              <span className="proficiency-pct">{pct}%</span>
+                              <span className="proficiency-level">{levelLabel}</span>
+                            </div>
+                          </div>
+                          <div className="topic-progress-bar">
+                            <div
+                              className="progress-fill"
+                              style={{
+                                width: `${pct}%`,
+                                backgroundColor: isCritical ? "var(--danger)" : "var(--warning)",
+                              }}
+                            />
+                          </div>
                         </div>
-                        <div className="topic-progress-bar">
-                          <div
-                            className="progress-fill"
-                            style={{
-                              width: `${Math.round(item.score * 100)}%`,
-                              backgroundColor: item.score < 0.5 ? "var(--color-danger)" : "var(--color-warning)",
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <button
                     type="button"

@@ -375,8 +375,8 @@ SCIENCE_10 = _course(
         )),
         Chapter(11, "Electricity", (
             "electricity", "electric current", "charge", "potential difference", "voltage",
-            "resistance", "ohm's law", "resistor", "series", "parallel", "electric power",
-            "heating effect", "fuse",
+            "resistance", "resistivity", "ohm", "ohm's law", "resistor", "series", "parallel",
+            "electric power", "heating effect", "joule", "ampere", "volt", "watt", "fuse", "circuit",
         )),
         Chapter(12, "Magnetic Effects of Electric Current", (
             "magnetic field", "magnet", "solenoid", "electromagnet", "electric motor",
@@ -468,7 +468,174 @@ COURSES: dict[tuple[int, str], Course] = {
 }
 
 
-# Classroom-only subjects can use the lecture transcript without a textbook index.
+# Classroom-only subjects also carry broad NCERT topic outlines for general Q&A.
+_BROAD_COURSE_CHAPTERS: dict[str, tuple[Chapter, ...]] = {
+    "social": (
+        Chapter(1, "History: Nationalism, Industrialisation & Modern World", (
+            "history", "nationalism", "french revolution", "industrial revolution", "colonialism",
+            "non-cooperation", "civil disobedience", "gandhi", "treaty", "empire", "print culture",
+        )),
+        Chapter(2, "Geography: Resources, Agriculture & Manufacturing", (
+            "geography", "resources", "soil", "forest", "wildlife", "water resources", "agriculture",
+            "cropping", "minerals", "energy", "manufacturing", "climate", "monsoon", "drainage",
+        )),
+        Chapter(3, "Political Science: Democracy, Federalism & Rights", (
+            "civics", "democracy", "constitution", "power sharing", "federalism", "political party",
+            "parliament", "judiciary", "fundamental rights", "election", "secularism", "governance",
+        )),
+        Chapter(4, "Economics: Development, Sectors, Money & Globalisation", (
+            "economics", "development", "gdp", "per capita income", "primary sector", "secondary",
+            "tertiary", "money", "credit", "banking", "globalisation", "consumer rights",
+        )),
+    ),
+    "english": (
+        Chapter(1, "Grammar & Sentence Structure", (
+            "grammar", "tense", "active voice", "passive voice", "reported speech", "direct speech",
+            "indirect speech", "modals", "determiners", "clauses", "subject-verb agreement", "preposition",
+        )),
+        Chapter(2, "Writing Skills & Composition", (
+            "formal letter", "analytical paragraph", "essay", "notice", "report writing",
+            "article", "summary", "thesis", "cohesion",
+        )),
+        Chapter(3, "Literature, Prose & Poetic Devices", (
+            "poetry", "prose", "metaphor", "simile", "alliteration", "personification", "irony",
+            "imagery", "rhyme scheme", "theme", "character", "narrator",
+        )),
+    ),
+    "physics": (
+        Chapter(1, "Mechanics: Kinematics, Laws of Motion, Work & Rotational Dynamics", (
+            "kinematics", "projectile", "newton's laws", "momentum", "friction", "work", "energy",
+            "power", "torque", "angular momentum", "gravitation", "kepler", "fluid", "bernoulli",
+        )),
+        Chapter(2, "Thermodynamics, Oscillations & Waves", (
+            "thermodynamics", "heat", "entropy", "carnot", "boyle", "ideal gas", "shm",
+            "simple harmonic motion", "wave", "doppler effect", "standing wave",
+        )),
+        Chapter(3, "Electricity, Magnetism, Optics & Modern Physics", (
+            "coulomb", "electric field", "gauss law", "capacitance", "current", "resistance",
+            "kirchhoff", "magnetic field", "ampere", "faraday", "inductance", "ac circuit",
+            "optics", "diffraction", "interference", "photoelectric effect", "semiconductor",
+        )),
+    ),
+    "chemistry": (
+        Chapter(1, "Physical Chemistry: Atomic Structure, Bonding & Equilibrium", (
+            "mole concept", "quantum number", "orbital", "periodic table", "ionisation", "vsepr",
+            "hybridisation", "thermodynamics", "enthalpy", "equilibrium", "le chatelier", "kinetics",
+            "electrochemistry", "nernst", "ph", "buffer",
+        )),
+        Chapter(2, "Inorganic Chemistry: s, p, d, f Block & Coordination Compounds", (
+            "alkali metal", "halogen", "noble gas", "transition metal", "coordination compound",
+            "ligand", "oxidation state", "redox", "metallurgy",
+        )),
+        Chapter(3, "Organic Chemistry: Hydrocarbons, Functional Groups & Biomolecules", (
+            "iupac", "isomerism", "inductive effect", "resonance", "alkane", "alkene", "alkyne",
+            "benzene", "alcohol", "aldehyde", "ketone", "carboxylic acid", "amine", "polymer", "biomolecule",
+        )),
+    ),
+    "biology": (
+        Chapter(1, "Cell Biology, Biomolecules & Genetics", (
+            "cell", "mitosis", "meiosis", "dna", "rna", "replication", "transcription", "translation",
+            "protein", "enzyme", "carbohydrate", "mendelian genetics", "inheritance", "mutation",
+        )),
+        Chapter(2, "Plant & Human Physiology", (
+            "photosynthesis", "respiration", "glycolysis", "krebs cycle", "transpiration", "xylem",
+            "digestion", "circulation", "heart", "nephron", "excretion", "neuron", "synapse", "hormone",
+        )),
+        Chapter(3, "Evolution, Biotechnology & Ecology", (
+            "evolution", "natural selection", "biotechnology", "pcr", "recombinant dna", "ecosystem",
+            "biodiversity", "population", "food chain", "immunity", "antibody",
+        )),
+    ),
+    "science": (
+        Chapter(1, "Physics Foundations: Motion, Force, Optics, Electricity & Magnetism", (
+            "motion", "force", "gravitation", "light", "reflection", "refraction", "electricity",
+            "current", "voltage", "resistance", "ohm", "magnetism", "energy", "sound",
+        )),
+        Chapter(2, "Chemistry Foundations: Matter, Atoms, Reactions, Acids & Carbon", (
+            "matter", "atom", "molecule", "chemical reaction", "acid", "base", "salt", "ph",
+            "metal", "non-metal", "carbon", "covalent", "periodic",
+        )),
+        Chapter(3, "Biology Foundations: Cells, Life Processes, Heredity & Environment", (
+            "cell", "tissue", "nutrition", "photosynthesis", "respiration", "reproduction",
+            "heredity", "nervous system", "hormone", "ecosystem",
+        )),
+    ),
+    "maths": (
+        Chapter(1, "Algebra, Geometry, Trigonometry, Calculus & Statistics", (
+            "algebra", "polynomial", "quadratic", "equation", "sets", "function", "calculus",
+            "derivative", "integral", "matrix", "determinant", "vector", "probability", "statistics",
+            "trigonometry", "coordinate geometry", "circle", "triangle",
+        )),
+    ),
+}
+
+SUBJECT_BROAD_TOPICS: dict[str, tuple[str, ...]] = {
+    "science": (
+        "physics", "chemistry", "biology", "motion", "velocity", "acceleration", "force", "momentum",
+        "inertia", "gravity", "gravitation", "pressure", "buoyancy", "work", "energy", "power",
+        "heat", "temperature", "light", "reflection", "refraction", "mirror", "lens", "optics",
+        "electricity", "current", "voltage", "potential", "resistance", "resistivity", "ohm",
+        "circuit", "resistor", "ampere", "volt", "watt", "joule", "charge", "electron", "magnet",
+        "magnetic", "electromagnet", "solenoid", "motor", "generator", "sound", "wave", "frequency",
+        "atom", "molecule", "element", "compound", "mixture", "solution", "acid", "base", "salt",
+        "ph", "metal", "non-metal", "reaction", "equation", "oxidation", "reduction", "carbon",
+        "covalent", "ionic", "hydrocarbon", "isomer", "periodic", "cell", "nucleus", "mitochondria",
+        "tissue", "xylem", "phloem", "photosynthesis", "respiration", "digestion", "blood", "heart",
+        "kidney", "nephron", "neuron", "brain", "hormone", "reproduction", "gene", "dna", "heredity",
+        "mendel", "ecosystem", "food chain", "ozone",
+    ),
+    "maths": (
+        "number", "integer", "rational", "irrational", "real", "prime", "hcf", "lcm", "exponent",
+        "power", "logarithm", "algebra", "polynomial", "zero", "root", "factor", "linear",
+        "quadratic", "discriminant", "sequence", "series", "progression", "geometry", "angle",
+        "triangle", "similar", "congruent", "pythagoras", "thales", "circle", "tangent", "chord",
+        "sector", "segment", "area", "perimeter", "volume", "surface", "cylinder", "cone", "sphere",
+        "coordinate", "distance", "midpoint", "slope", "trigonometry", "sine", "cosine", "tangent",
+        "matrix", "determinant", "calculus", "limit", "derivative", "integral", "set", "relation",
+        "function", "vector", "statistics", "mean", "median", "mode", "variance", "probability",
+    ),
+    "physics": (
+        "motion", "kinematics", "velocity", "acceleration", "force", "newton", "momentum",
+        "torque", "angular", "gravitation", "pressure", "fluid", "bernoulli", "thermodynamics",
+        "heat", "entropy", "wave", "oscillation", "shm", "sound", "light", "optics", "mirror",
+        "lens", "interference", "diffraction", "electricity", "charge", "coulomb", "electric",
+        "current", "voltage", "potential", "capacitance", "resistance", "resistivity", "ohm",
+        "kirchhoff", "circuit", "magnetism", "faraday", "inductance", "transformer", "semiconductor",
+        "quantum", "photoelectric", "photon", "atom", "nucleus",
+    ),
+    "chemistry": (
+        "atom", "molecule", "mole", "molar", "orbital", "quantum", "periodic", "valency",
+        "bond", "ionic", "covalent", "hybridisation", "vsepr", "enthalpy", "entropy", "gibbs",
+        "equilibrium", "kinetics", "rate", "catalyst", "electrochemistry", "nernst", "ph", "acid",
+        "base", "salt", "redox", "oxidation", "reduction", "hydrocarbon", "alkane", "alkene",
+        "alkyne", "alcohol", "aldehyde", "ketone", "carboxylic", "amine", "isomer", "polymer",
+        "coordination", "ligand", "solution", "colligative",
+    ),
+    "biology": (
+        "cell", "organelle", "membrane", "mitosis", "meiosis", "dna", "rna", "gene", "chromosome",
+        "protein", "enzyme", "carbohydrate", "lipid", "photosynthesis", "respiration", "atp",
+        "glycolysis", "xylem", "phloem", "transpiration", "digestion", "circulation", "heart",
+        "blood", "respiratory", "kidney", "nephron", "neuron", "synapse", "hormone", "endocrine",
+        "reproduction", "fertilisation", "genetics", "mendel", "evolution", "immunity", "antibody",
+        "biotechnology", "pcr", "ecosystem", "biodiversity",
+    ),
+    "english": (
+        "grammar", "noun", "pronoun", "verb", "adjective", "adverb", "preposition", "conjunction",
+        "tense", "clause", "phrase", "voice", "active", "passive", "speech", "reported", "modal",
+        "determiner", "article", "punctuation", "essay", "letter", "paragraph", "summary", "notice",
+        "report", "poem", "poetry", "prose", "metaphor", "simile", "alliteration", "personification",
+        "irony", "imagery", "theme", "narrator", "comprehension", "vocabulary", "synonym", "antonym",
+    ),
+    "social": (
+        "history", "revolution", "nationalism", "colonialism", "imperialism", "independence",
+        "gandhi", "civilisation", "empire", "war", "treaty", "constitution", "democracy",
+        "federalism", "parliament", "government", "election", "rights", "judiciary", "geography",
+        "monsoon", "climate", "soil", "river", "agriculture", "resource", "mineral", "industry",
+        "population", "economics", "gdp", "income", "development", "bank", "credit", "money",
+        "trade", "globalisation", "sector", "market",
+    ),
+}
+
 SCHOOL_SUBJECTS = {
     9: ("english", "social"),
     10: ("english", "social"),
@@ -479,7 +646,19 @@ for _level, _subjects in SCHOOL_SUBJECTS.items():
     for _code in _subjects:
         SUBJECT_LABELS.setdefault(_code, "Social Science" if _code == "social" else _code.title())
         _SUBJECT_ALIASES.setdefault(_code, _code)
-        COURSES.setdefault((_level, _code), Course(_level, _code, ()))
+        COURSES.setdefault((_level, _code), Course(_level, _code, _BROAD_COURSE_CHAPTERS.get(_code, ())))
+
+
+def subject_topic_overview(course: Course) -> str:
+    """Return a concise overview of the subject's chapter list and broad concepts."""
+    parts = [f"Course: {course.label}."]
+    if course.chapters:
+        titles = ", ".join(f"{ch.number}. {ch.title}" for ch in course.chapters[:16])
+        parts.append(f"Syllabus units/chapters: {titles}.")
+    broad = SUBJECT_BROAD_TOPICS.get(course.subject, ())
+    if broad:
+        parts.append(f"Core subject concepts: {', '.join(broad[:30])}.")
+    return " ".join(parts)
 
 
 def normalize_subject(subject: str) -> str:

@@ -75,7 +75,15 @@ class CaptionPipeline:
         for block in self.source.blocks():
             if stop is not None and stop():
                 break
-            for utterance in self.segmenter.feed(block):
+            utterances = self.segmenter.feed(block)
+            # If multiple partials queued from buffered blocks, only decode finals + the latest partial
+            last_partial_idx = max(
+                (i for i, u in enumerate(utterances) if not u.final),
+                default=-1,
+            )
+            for idx, utterance in enumerate(utterances):
+                if not utterance.final and idx != last_partial_idx:
+                    continue
                 event = self._run_utterance(utterance, context)
                 if event is None:
                     continue
@@ -97,9 +105,18 @@ class CaptionPipeline:
         if not utterance.final and not self.partials.enabled:
             return None
 
+        audio = _normalize_quiet_speech(utterance.audio)
         started = time.perf_counter()
         try:
-            result = self.asr.transcribe(utterance.audio, initial_prompt=context or None)
+            stream_fn = getattr(self.asr, "transcribe_stream", None)
+            if callable(stream_fn):
+                result = stream_fn(
+                    audio,
+                    initial_prompt=context or None,
+                    final=utterance.final,
+                )
+            else:
+                result = self.asr.transcribe(audio, initial_prompt=context or None)
         except Exception:
             logger.exception("transcription failed for utterance %s", utterance.utterance_id)
             return None
@@ -141,6 +158,18 @@ class CaptionPipeline:
             return context
         combined = f"{context} {text}".strip()
         return combined[-self.prompt_chars :]
+
+
+def _normalize_quiet_speech(audio: np.ndarray) -> np.ndarray:
+    """Boost soft microphone speech toward standard loudness without amplifying dead silence."""
+    samples = np.ascontiguousarray(audio, dtype=np.float32).reshape(-1)
+    if samples.size == 0:
+        return samples
+    peak = float(np.max(np.abs(samples)))
+    if 0.005 <= peak < 0.25:
+        gain = min(12.0, 0.5 / peak)
+        return np.clip(samples * gain, -1.0, 1.0).astype(np.float32, copy=False)
+    return samples
 
 
 def build_segmenter(

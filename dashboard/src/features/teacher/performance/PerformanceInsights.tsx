@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { subscribeRealtime } from "../../../realtime";
 import {
   getTeacherGaps,
   getTeacherImprovement,
@@ -49,8 +50,8 @@ export function PerformanceInsights({ user }: PerformanceInsightsProps) {
   // Search filter
   const [search, setSearch] = useState("");
 
-  const fetchData = () => {
-    setLoading(true);
+  const fetchData = (silent = false) => {
+    if (!silent) setLoading(true);
     Promise.all([
       getTeacherStudents(),
       getTeacherGaps(),
@@ -63,15 +64,19 @@ export function PerformanceInsights({ user }: PerformanceInsightsProps) {
         setError(null);
       })
       .catch((err) => {
-        setError(messageOf(err));
+        if (!silent) setError(messageOf(err));
       })
       .finally(() => {
-        setLoading(false);
+        if (!silent) setLoading(false);
       });
   };
 
   useEffect(() => {
-    fetchData();
+    fetchData(false);
+    return subscribeRealtime(
+      ["student_activity", "quiz_updated"],
+      () => fetchData(true),
+    );
   }, []);
 
   const handleOpenStudentDetail = async (studentId: string) => {

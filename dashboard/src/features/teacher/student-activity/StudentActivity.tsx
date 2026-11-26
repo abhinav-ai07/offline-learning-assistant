@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getTeacherActivity, getTeacherClasses } from "../../../api";
+import { subscribeRealtime } from "../../../realtime";
 import { messageOf } from "../../../format";
 import type { ActivityLogItem, AuthUser, TeacherClassOverview } from "../../../types";
 import {
@@ -33,8 +34,8 @@ export function StudentActivity({ user }: StudentActivityProps) {
       .catch(() => {});
   }, []);
 
-  const fetchActivity = () => {
-    setLoading(true);
+  const fetchActivity = (silent = false) => {
+    if (!silent) setLoading(true);
     const cls = classes[selectedClassIndex];
     getTeacherActivity({
       classLevel: cls?.class_level,
@@ -46,15 +47,19 @@ export function StudentActivity({ user }: StudentActivityProps) {
         setError(null);
       })
       .catch((err) => {
-        setError(messageOf(err));
+        if (!silent) setError(messageOf(err));
       })
       .finally(() => {
-        setLoading(false);
+        if (!silent) setLoading(false);
       });
   };
 
   useEffect(() => {
-    fetchActivity();
+    fetchActivity(false);
+    return subscribeRealtime(
+      ["student_activity", "quiz_updated"],
+      () => fetchActivity(true),
+    );
   }, [classes, selectedClassIndex]);
 
   const filteredEvents = activityEvents.filter((ev) => {

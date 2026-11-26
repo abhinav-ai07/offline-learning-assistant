@@ -205,9 +205,9 @@ export function StudentProgressView({ onPracticeTopic }: StudentProgressViewProp
                 </p>
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 {/* Search Bar */}
-                <div className="input-with-icon" style={{ minWidth: 200 }}>
+                <div className="input-with-icon" style={{ minWidth: 210 }}>
                   <SearchIcon />
                   <input
                     type="text"
@@ -215,7 +215,6 @@ export function StudentProgressView({ onPracticeTopic }: StudentProgressViewProp
                     placeholder="Search chapters…"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    style={{ paddingLeft: 30, fontSize: "0.78rem" }}
                   />
                 </div>
 
@@ -225,7 +224,6 @@ export function StudentProgressView({ onPracticeTopic }: StudentProgressViewProp
                     type="button"
                     className={tierFilter === "all" ? "active" : ""}
                     onClick={() => setTierFilter("all")}
-                    style={{ padding: "4px 8px", fontSize: "0.74rem" }}
                   >
                     All ({data.topic_mastery.length})
                   </button>
@@ -233,7 +231,6 @@ export function StudentProgressView({ onPracticeTopic }: StudentProgressViewProp
                     type="button"
                     className={tierFilter === "critical" ? "active" : ""}
                     onClick={() => setTierFilter("critical")}
-                    style={{ padding: "4px 8px", fontSize: "0.74rem" }}
                   >
                     Critical
                   </button>
@@ -241,7 +238,6 @@ export function StudentProgressView({ onPracticeTopic }: StudentProgressViewProp
                     type="button"
                     className={tierFilter === "review" ? "active" : ""}
                     onClick={() => setTierFilter("review")}
-                    style={{ padding: "4px 8px", fontSize: "0.74rem" }}
                   >
                     Review
                   </button>
@@ -249,7 +245,6 @@ export function StudentProgressView({ onPracticeTopic }: StudentProgressViewProp
                     type="button"
                     className={tierFilter === "proficient" ? "active" : ""}
                     onClick={() => setTierFilter("proficient")}
-                    style={{ padding: "4px 8px", fontSize: "0.74rem" }}
                   >
                     Proficient
                   </button>
