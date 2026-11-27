@@ -129,13 +129,15 @@ CREATE TABLE IF NOT EXISTS academic_classes (
     id TEXT PRIMARY KEY,
     class_level INTEGER UNIQUE NOT NULL,
     name TEXT NOT NULL,
-    academic_year TEXT NOT NULL
+    academic_year TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS sections (
     id TEXT PRIMARY KEY,
     class_level INTEGER NOT NULL,
     name TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY(class_level) REFERENCES academic_classes(class_level),
     UNIQUE(class_level, name)
 );
@@ -383,7 +385,7 @@ class Storage:
 
     def _init(self) -> None:
         with self._connection() as connection:
-            if connection.execute("PRAGMA user_version").fetchone()[0] < 2 and connection.execute(
+            if connection.execute("PRAGMA user_version").fetchone()[0] < 4 and connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE name='users'"
             ).fetchone():
                 folder = self.path.parent / "backups"
@@ -416,8 +418,9 @@ class Storage:
             for level in (11,12):
                 connection.execute("INSERT OR IGNORE INTO subjects VALUES (?,?,?,?,?)",
                                    (f"sub-{level}-science",level,"science","Science","book"))
-            if connection.execute("PRAGMA user_version").fetchone()[0] < 2:
-                connection.execute("PRAGMA user_version=2")
+            self._migrate_school_catalogue(connection)
+            if connection.execute("PRAGMA user_version").fetchone()[0] < 4:
+                connection.execute("PRAGMA user_version=4")
 
     def _migrate_user_email(self, connection: sqlite3.Connection) -> None:
         columns = list(connection.execute("PRAGMA table_info(users)"))
@@ -468,6 +471,60 @@ class Storage:
             raise
         finally:
             connection.execute("PRAGMA foreign_keys = ON")
+
+    def _migrate_school_catalogue(self, connection: sqlite3.Connection) -> None:
+        """Keep curriculum data intact while activating only the default school class."""
+        class_columns = {
+            column["name"] for column in connection.execute("PRAGMA table_info(academic_classes)")
+        }
+        if "is_active" not in class_columns:
+            connection.execute(
+                "ALTER TABLE academic_classes ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0"
+            )
+
+        section_columns = {
+            column["name"] for column in connection.execute("PRAGMA table_info(sections)")
+        }
+        if "is_active" not in section_columns:
+            connection.execute(
+                "ALTER TABLE sections ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0"
+            )
+
+        if connection.execute("PRAGMA user_version").fetchone()[0] < 4:
+            connection.execute(
+                """INSERT OR IGNORE INTO academic_classes
+                   (id, class_level, name, academic_year, is_active)
+                   VALUES ('class-10', 10, 'Class 10', '2026-2027', 1)"""
+            )
+            connection.execute(
+                """INSERT OR IGNORE INTO sections (id, class_level, name, is_active)
+                   VALUES ('sec-10-A', 10, 'A', 1)"""
+            )
+            connection.execute(
+                """UPDATE academic_classes SET is_active = (
+                       class_level = 10
+                       OR class_level IN (
+                           SELECT class_level FROM users WHERE role IN ('student','teacher')
+                       )
+                       OR class_level IN (SELECT class_level FROM teacher_class_assignments)
+                   )"""
+            )
+            connection.execute(
+                """UPDATE sections SET is_active = (
+                       (class_level = 10 AND name = 'A')
+                       OR EXISTS (
+                           SELECT 1 FROM users u
+                           WHERE u.role IN ('student','teacher')
+                             AND u.class_level = sections.class_level
+                             AND COALESCE(u.section, 'A') = sections.name
+                       )
+                       OR EXISTS (
+                           SELECT 1 FROM teacher_class_assignments a
+                           WHERE a.class_level = sections.class_level
+                             AND a.section = sections.name
+                       )
+                   )"""
+            )
 
     def _seed_academic_data(self, connection: sqlite3.Connection) -> None:
         """Initialize the class, section and curriculum catalogues for a new school."""
@@ -996,6 +1053,129 @@ class Storage:
             "updated_at": now,
             "is_active": True,
         }
+
+    def delete_school_account(self, account_id: str) -> bool:
+        """Permanently remove a student or teacher and their account-owned records."""
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            user = connection.execute(
+                "SELECT id, student_identifier, role FROM users WHERE id = ?",
+                (account_id,),
+            ).fetchone()
+            if not user or user["role"] not in ("student", "teacher"):
+                return False
+
+            identifiers = tuple(
+                dict.fromkeys((account_id, user["student_identifier"] or account_id))
+            )
+            identifier_marks = ",".join("?" for _ in identifiers)
+
+            if user["role"] == "teacher":
+                lesson_ids = [
+                    row["id"]
+                    for row in connection.execute(
+                        "SELECT id FROM lessons WHERE teacher_id = ?",
+                        (account_id,),
+                    )
+                ]
+                if lesson_ids:
+                    lesson_marks = ",".join("?" for _ in lesson_ids)
+                    quiz_ids = [
+                        row["quiz_id"]
+                        for row in connection.execute(
+                            f"SELECT quiz_id FROM lesson_quizzes WHERE lesson_id IN ({lesson_marks})",
+                            lesson_ids,
+                        )
+                    ]
+                    if quiz_ids:
+                        quiz_marks = ",".join("?" for _ in quiz_ids)
+                        connection.execute(
+                            f"DELETE FROM quiz_attempts WHERE quiz_id IN ({quiz_marks})",
+                            quiz_ids,
+                        )
+                        connection.execute(
+                            f"DELETE FROM lesson_quizzes WHERE lesson_id IN ({lesson_marks})",
+                            lesson_ids,
+                        )
+                        connection.execute(
+                            f"DELETE FROM quiz_sessions WHERE id IN ({quiz_marks})",
+                            quiz_ids,
+                        )
+                    else:
+                        connection.execute(
+                            f"DELETE FROM lesson_quizzes WHERE lesson_id IN ({lesson_marks})",
+                            lesson_ids,
+                        )
+
+                    connection.execute(
+                        f"DELETE FROM lesson_documents WHERE lesson_id IN ({lesson_marks})",
+                        lesson_ids,
+                    )
+                    connection.execute(
+                        f"DELETE FROM lesson_activity WHERE lesson_id IN ({lesson_marks})",
+                        lesson_ids,
+                    )
+                    connection.execute(
+                        f"DELETE FROM lesson_completions WHERE lesson_id IN ({lesson_marks})",
+                        lesson_ids,
+                    )
+                    connection.execute(
+                        f"DELETE FROM lessons WHERE id IN ({lesson_marks})",
+                        lesson_ids,
+                    )
+                connection.execute(
+                    "DELETE FROM assignments WHERE teacher_id = ?",
+                    (account_id,),
+                )
+
+            quiz_ids = [
+                row["id"]
+                for row in connection.execute(
+                    f"SELECT id FROM quiz_sessions WHERE student_id IN ({identifier_marks})",
+                    identifiers,
+                )
+            ]
+            connection.execute(
+                f"DELETE FROM quiz_attempts WHERE student_id IN ({identifier_marks})",
+                identifiers,
+            )
+            connection.execute(
+                "DELETE FROM lesson_quizzes WHERE student_id = ?",
+                (account_id,),
+            )
+            if quiz_ids:
+                quiz_marks = ",".join("?" for _ in quiz_ids)
+                connection.execute(
+                    f"DELETE FROM lesson_quizzes WHERE quiz_id IN ({quiz_marks})",
+                    quiz_ids,
+                )
+                connection.execute(
+                    f"DELETE FROM quiz_attempts WHERE quiz_id IN ({quiz_marks})",
+                    quiz_ids,
+                )
+                connection.execute(
+                    f"DELETE FROM quiz_sessions WHERE id IN ({quiz_marks})",
+                    quiz_ids,
+                )
+            connection.execute(
+                f"DELETE FROM mastery WHERE student_id IN ({identifier_marks})",
+                identifiers,
+            )
+            connection.execute(
+                f"DELETE FROM remediation_records WHERE student_id IN ({identifier_marks})",
+                identifiers,
+            )
+            connection.execute(
+                f"DELETE FROM lesson_activity WHERE student_id IN ({identifier_marks})",
+                identifiers,
+            )
+            connection.execute(
+                "DELETE FROM lesson_completions WHERE student_id = ?",
+                (account_id,),
+            )
+            connection.execute("DELETE FROM sessions WHERE user_id = ?", (account_id,))
+            connection.execute("DELETE FROM users WHERE id = ?", (account_id,))
+            return True
 
     def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         with self._connection() as connection:

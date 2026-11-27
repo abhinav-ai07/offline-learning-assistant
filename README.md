@@ -6,6 +6,9 @@ From the sem5 directory, run `python start.py` or open `start.bat`. On the first
 
 Open [Administration](http://127.0.0.1:8765/admin/login), [Teacher](http://127.0.0.1:8765/teacher/login) or [Student](http://127.0.0.1:8765/student/login). In Administration, use Classes to manage sections, then Students and Teachers to issue credentials and assign classes and subjects. Each portal includes a password change action.
 
+The administration directory starts with Class 10, Section A. Add other supported classes later from Classes & Sections; each new class starts with Section A.
+Administrators can permanently delete student or teacher accounts; deleting a student also removes their learning records, while deleting a teacher removes their lessons and assignments.
+
 Teachers can save a lesson draft in Lesson Studio and reopen it in the Lesson Library. Publishing stores the reviewed transcript and notes, creates class notifications and makes the dated lecture available in My Subjects. A quiz launched from that lecture uses its transcript and notes. The administration directory and teacher reports use the same SQLite database.
 
 

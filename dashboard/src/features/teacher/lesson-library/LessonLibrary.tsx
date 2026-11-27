@@ -24,6 +24,7 @@ export function LessonLibrary({ user, onOpenLesson, onEditInStudio }: LessonLibr
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lessons, setLessons] = useState<LessonSummary[]>([]);
+  const [allLessons, setAllLessons] = useState<LessonSummary[]>([]);
 
   // Filter states
   const [search, setSearch] = useState("");
@@ -55,6 +56,20 @@ export function LessonLibrary({ user, onOpenLesson, onEditInStudio }: LessonLibr
     fetchLessons();
   }, [statusFilter, subjectFilter, classFilter]);
 
+  useEffect(() => {
+    let isMounted = true;
+    getTeacherLessons()
+      .then((data) => {
+        if (isMounted) setAllLessons(data);
+      })
+      .catch((err) => {
+        if (isMounted) setError(messageOf(err));
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     fetchLessons();
@@ -65,6 +80,7 @@ export function LessonLibrary({ user, onOpenLesson, onEditInStudio }: LessonLibr
     try {
       await publishTeacherLesson(lessonId);
       fetchLessons();
+      getTeacherLessons().then(setAllLessons).catch((err) => setError(messageOf(err)));
     } catch (err) {
       alert(messageOf(err));
     }
@@ -75,6 +91,7 @@ export function LessonLibrary({ user, onOpenLesson, onEditInStudio }: LessonLibr
     try {
       await archiveTeacherLesson(lessonId);
       fetchLessons();
+      getTeacherLessons().then(setAllLessons).catch((err) => setError(messageOf(err)));
     } catch (err) {
       alert(messageOf(err));
     }
@@ -91,6 +108,13 @@ export function LessonLibrary({ user, onOpenLesson, onEditInStudio }: LessonLibr
           </p>
         </div>
       </div>
+
+      <section className="library-stats-grid" aria-label="Lesson library summary">
+        <div className="library-stat-card"><span><BookIcon width={20} height={20} /></span><span><strong>{allLessons.length}</strong><small>Total Lessons</small></span></div>
+        <div className="library-stat-card"><span><CheckCircleIcon width={20} height={20} /></span><span><strong>{allLessons.filter((lesson) => lesson.status === "published").length}</strong><small>Published</small></span></div>
+        <div className="library-stat-card"><span><FileTextIcon width={20} height={20} /></span><span><strong>{allLessons.filter((lesson) => lesson.has_transcript).length}</strong><small>Transcripts</small></span></div>
+        <div className="library-stat-card"><span><EditIcon width={20} height={20} /></span><span><strong>{allLessons.filter((lesson) => lesson.has_notes).length}</strong><small>Notes</small></span></div>
+      </section>
 
       {/* Filter and Search Bar */}
       <div className="library-filter-panel">

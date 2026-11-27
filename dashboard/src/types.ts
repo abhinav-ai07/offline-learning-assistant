@@ -703,10 +703,23 @@ export interface TeacherClassOverview {
   subject: string;
   subject_label: string;
   students_count: number;
-  students: any[];
+  students: TeacherClassStudent[];
   chapters: ChapterInfo[];
   timetable: TimetableSlot[];
   lessons: LessonSummary[];
+}
+
+export interface TeacherClassStudent {
+  id: string;
+  full_name: string;
+  student_identifier: string | null;
+  class_level: number;
+  section: string;
+  avg_mastery: number;
+  attempts_count: number;
+  accuracy: number | null;
+  accessed: number;
+  last_activity: string;
 }
 
 export interface AuthResponse {

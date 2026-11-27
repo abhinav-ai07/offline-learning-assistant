@@ -1,21 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getStudentSubjectsTree } from "../../../api";
 import { messageOf } from "../../../format";
-import type { AuthUser, LessonSummary, SubjectTree } from "../../../types";
-import {
-  BookIcon,
-  CheckCircleIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  FileTextIcon,
-  FolderIcon,
-  LayersIcon,
-  WarningIcon,
-} from "../../../components/icons";
+import type { AuthUser, SubjectTree } from "../../../types";
+import { BookIcon, CalendarIcon, CheckCircleIcon, FileTextIcon, WarningIcon } from "../../../components/icons";
 
 interface MySubjectsProps {
   user: AuthUser;
   onSelectLesson: (lessonId: string) => void;
+}
+
+function SubjectIcon({ name }: { name: string }) {
+  const subject = name.toLowerCase();
+  if (subject.includes("math")) {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10M7 11h2m3 0h2m3 0h.01M7 15h2m3 0h2m3 0h.01M7 19h2m3 0h2"/></svg>;
+  }
+  if (subject === "science") {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6m-5 0v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/><path d="M8 16h8"/></svg>;
+  }
+  if (subject.includes("social")) {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>;
+  }
+  return <BookIcon width={28} height={28} />;
 }
 
 export function MySubjects({ user, onSelectLesson }: MySubjectsProps) {
@@ -23,24 +28,17 @@ export function MySubjects({ user, onSelectLesson }: MySubjectsProps) {
   const [error, setError] = useState<string | null>(null);
   const [subjectsTree, setSubjectsTree] = useState<SubjectTree[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
-  const [expandedChapters, setExpandedChapters] = useState<Record<number, boolean>>({});
+  const [activeContentTab, setActiveContentTab] = useState<"lectures" | "materials">("lectures");
 
   useEffect(() => {
     let isMounted = true;
-    setLoading(true);
     getStudentSubjectsTree()
       .then((tree) => {
-        if (isMounted) {
-          setSubjectsTree(tree);
-          if (tree.length > 0 && !selectedSubject) {
-            setSelectedSubject(tree[0].subject_code);
-            // Expand first chapter by default
-            if (tree[0].chapters.length > 0) {
-              setExpandedChapters({ [tree[0].chapters[0].chapter_number]: true });
-            }
-          }
-          setError(null);
-        }
+        if (!isMounted) return;
+        setSubjectsTree(tree);
+        const preferred = tree.find((subject) => subject.subject_code.toLowerCase() === "science") || tree[0];
+        if (preferred) setSelectedSubject(preferred.subject_code);
+        setError(null);
       })
       .catch((err) => {
         if (isMounted) setError(messageOf(err));
@@ -53,212 +51,114 @@ export function MySubjects({ user, onSelectLesson }: MySubjectsProps) {
     };
   }, []);
 
-  const toggleChapter = (chapterNum: number) => {
-    setExpandedChapters((prev) => ({
-      ...prev,
-      [chapterNum]: !prev[chapterNum],
-    }));
-  };
+  const activeSubject = subjectsTree.find((subject) => subject.subject_code === selectedSubject) || subjectsTree[0];
+  const lessons = useMemo(() => activeSubject?.chapters.flatMap((chapter) =>
+    chapter.lessons.map((lesson) => ({ lesson, chapterTitle: chapter.title })),
+  ) || [], [activeSubject]);
+  const materialLessons = lessons.filter(({ lesson }) => lesson.has_notes);
 
   if (loading) {
-    return (
-      <div className="portal-loading-state">
-        <div className="spinner" />
-        <p>Loading your curriculum &amp; subjects tree...</p>
-      </div>
-    );
+    return <div className="portal-loading-state"><div className="spinner" /><p>Loading your subjects...</p></div>;
   }
 
   if (error) {
     return (
       <div className="portal-error-card">
         <WarningIcon width={24} height={24} />
-        <div>
-          <h4>Failed to load subjects</h4>
-          <p>{error}</p>
-        </div>
+        <div><h4>Failed to load subjects</h4><p>{error}</p></div>
       </div>
     );
   }
 
-  const activeSubject = subjectsTree.find((s) => s.subject_code === selectedSubject) || subjectsTree[0];
-
   return (
     <div className="my-subjects-container">
-      {/* Top Banner */}
-      <div className="subjects-header-banner">
-        <div>
-          <h2>My Subjects &amp; Classroom Lectures</h2>
-          <p className="header-subtitle">
-            Class {user.class_level}{user.section || "A"} · Academic Hierarchy: Class &rarr; Section &rarr; Subject &rarr; Chapter &rarr; Daily Lesson
-          </p>
-        </div>
-      </div>
+      <header className="subjects-header-banner">
+        <h1>My Subjects</h1>
+        <p>Browse your enrolled subjects and access recently published lectures.</p>
+      </header>
 
-      {/* Subject Selection Tabs */}
-      <div className="subject-selector-strip" role="tablist">
-        {subjectsTree.map((subj) => (
+      <div className="subject-selector-strip" role="tablist" aria-label="Subjects">
+        {subjectsTree.map((subject) => (
           <button
-            key={subj.subject_code}
+            key={subject.subject_code}
             type="button"
             role="tab"
-            aria-selected={activeSubject?.subject_code === subj.subject_code}
-            className={`subject-chip-btn ${activeSubject?.subject_code === subj.subject_code ? "active" : ""}`}
+            aria-selected={activeSubject?.subject_code === subject.subject_code}
+            className={`subject-chip-btn${activeSubject?.subject_code === subject.subject_code ? " active" : ""}`}
             onClick={() => {
-              setSelectedSubject(subj.subject_code);
-              if (subj.chapters.length > 0) {
-                setExpandedChapters({ [subj.chapters[0].chapter_number]: true });
-              }
+              setSelectedSubject(subject.subject_code);
+              setActiveContentTab("lectures");
             }}
           >
-            <BookIcon width={16} height={16} />
-            <span className="chip-label">{subj.subject_name}</span>
-            <span className="chip-badge">{subj.total_lessons} lessons</span>
+            <SubjectIcon name={subject.subject_name} />
+            <strong>{subject.subject_name}</strong>
+            <span className="chip-badge">{subject.total_lessons} Published Lectures</span>
           </button>
         ))}
       </div>
 
-      {/* Chapters & Lessons Tree */}
       {activeSubject && (
-        <div className="subject-detail-workspace">
-          <div className="subject-kpi-bar">
+        <section className="subject-detail-workspace">
+          <header className="subject-kpi-bar">
+            <span className="subject-detail-icon"><SubjectIcon name={activeSubject.subject_name} /></span>
             <div className="subject-kpi-info">
-              <h3>{activeSubject.subject_name}</h3>
-              <p>NCERT Class {user.class_level} Curriculum · {activeSubject.chapters.length} Chapters</p>
+              <h2>{activeSubject.subject_name}</h2>
+              <p>Class {user.class_level}{user.section || "A"}</p>
             </div>
             <div className="subject-progress-stats">
-              <span className="progress-text">
-                {activeSubject.completed_lessons} of {activeSubject.total_lessons} lessons studied ({activeSubject.progress_pct}%)
-              </span>
-              <div className="progress-bar-mini">
-                <div
-                  className="progress-bar-fill"
-                  style={{ width: `${activeSubject.progress_pct}%` }}
-                />
-              </div>
+              <span>Subject Progress</span>
+              <div className="progress-bar-mini"><span style={{ width: `${activeSubject.progress_pct}%` }} /></div>
+              <strong>{activeSubject.progress_pct}%</strong>
             </div>
+          </header>
+
+          <div className="student-subject-tabs" role="tablist" aria-label={`${activeSubject.subject_name} content`}>
+            <button type="button" role="tab" aria-selected={activeContentTab === "lectures"} className={activeContentTab === "lectures" ? "active" : ""} onClick={() => setActiveContentTab("lectures")}>
+              <span className="student-tab-play">▶</span> Published Lectures ({activeSubject.total_lessons})
+            </button>
+            <button type="button" role="tab" aria-selected={activeContentTab === "materials"} className={activeContentTab === "materials" ? "active" : ""} onClick={() => setActiveContentTab("materials")}>
+              <BookIcon width={16} height={16} /> Study Material
+            </button>
           </div>
 
-          <div className="chapters-accordion-list">
-            {activeSubject.chapters.length === 0 ? (
-              <div className="empty-state-card">
-                <FolderIcon width={32} height={32} />
-                <h4>No chapters loaded for {activeSubject.subject_name}</h4>
-              </div>
-            ) : (
-              activeSubject.chapters.map((chapter) => {
-                const isExpanded = Boolean(expandedChapters[chapter.chapter_number]);
-                return (
-                  <div key={chapter.chapter_number} className={`chapter-card ${isExpanded ? "expanded" : ""}`}>
-                    <div
-                      className="chapter-header-row"
-                      onClick={() => toggleChapter(chapter.chapter_number)}
-                    >
-                      <div className="chapter-title-group">
-                        <span className="chapter-number-pill">Chapter {chapter.chapter_number}</span>
-                        <h4 className="chapter-title">{chapter.title}</h4>
-                      </div>
-
-                      <div className="chapter-meta-group">
-                        <span className="lessons-count-tag">
-                          {chapter.lessons_count} {chapter.lessons_count === 1 ? "lesson" : "lessons"}
-                        </span>
-                        {chapter.completed_count > 0 && (
-                          <span className="completed-tag">
-                            <CheckCircleIcon width={12} height={12} /> {chapter.completed_count} studied
-                          </span>
-                        )}
-                        <span className="expand-chevron">
-                          {isExpanded ? <ChevronUpIcon width={16} height={16} /> : <ChevronDownIcon width={16} height={16} />}
-                        </span>
-                      </div>
+          {activeContentTab === "lectures" ? (
+            <div className="student-subject-lecture-list">
+              {lessons.length === 0 ? (
+                <div className="empty-state-card"><BookIcon width={28} height={28} /><p>No published lectures for this subject yet.</p></div>
+              ) : lessons.map(({ lesson, chapterTitle }, index) => (
+                <article className="student-subject-lecture" key={lesson.id}>
+                  <span className="student-lesson-icon"><span>▶</span></span>
+                  <div className="student-subject-lecture-main">
+                    <h3>Lecture {index + 1}: {lesson.title}</h3>
+                    <div className="student-subject-lecture-meta">
+                      <span><CalendarIcon width={14} height={14} />{lesson.teaching_date}</span>
+                      <span><span className="student-meta-person">♙</span>Teacher: {lesson.teacher_name || "Faculty"}</span>
+                      <span>{chapterTitle}</span>
                     </div>
-
-                    {isExpanded && (
-                      <div className="chapter-lessons-container">
-                        {chapter.lessons.length === 0 ? (
-                          <div className="no-lessons-in-chapter">
-                            <p>No classroom lessons have been published for this chapter yet.</p>
-                          </div>
-                        ) : (
-                          <div className="lessons-table-wrapper">
-                            <table className="lessons-table">
-                              <thead>
-                                <tr>
-                                  <th>Lesson Title</th>
-                                  <th>Teaching Date</th>
-                                  <th>Faculty</th>
-                                  <th>Status</th>
-                                  <th>Study Status</th>
-                                  <th>Action</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {chapter.lessons.map((lesson) => (
-                                  <tr key={lesson.id} className="lesson-row">
-                                    <td className="lesson-name-cell">
-                                      <div className="lesson-name-title">{lesson.title}</div>
-                                      <div className="lesson-sub-info">
-                                        Published on {lesson.published_at ? new Date(lesson.published_at).toLocaleDateString() : lesson.teaching_date}
-                                      </div>
-                                    </td>
-                                    <td className="lesson-date-cell">{lesson.teaching_date}</td>
-                                    <td className="lesson-teacher-cell">{lesson.teacher_name || "Faculty"}</td>
-                                    <td>
-                                      <div className="material-badges-row">
-                                        {lesson.has_transcript && (
-                                          <span className="badge-micro badge-transcript" title="Classroom transcript available">
-                                            Transcript
-                                          </span>
-                                        )}
-                                        {lesson.has_notes && (
-                                          <span className="badge-micro badge-notes" title="Generated notes available">
-                                            Notes
-                                          </span>
-                                        )}
-                                      </div>
-                                    </td>
-                                    <td>
-                                      {lesson.completed ? (
-                                        <span className="study-status studied">
-                                          <CheckCircleIcon width={13} height={13} /> Studied
-                                        </span>
-                                      ) : (
-                                        <span className="study-status pending">Pending</span>
-                                      )}
-                                    </td>
-                                    <td>
-                                      <button
-                                        type="button"
-                                        className="btn btn-outline btn-sm"
-                                        onClick={() => onSelectLesson(lesson.id)}
-                                      >
-                                        Open Lesson
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
-                );
-              })
-            )}
-          </div>
-        </div>
+                  <div className="student-subject-lecture-actions">
+                    {lesson.has_transcript && <button type="button" className="btn btn-outline btn-sm" onClick={() => onSelectLesson(lesson.id)}><FileTextIcon width={16} height={16} />Transcript</button>}
+                    {lesson.has_notes && <button type="button" className="btn btn-outline btn-sm" onClick={() => onSelectLesson(lesson.id)}><FileTextIcon width={16} height={16} />Notes</button>}
+                    {lesson.completed && <span className="student-lecture-completed"><CheckCircleIcon width={14} height={14} /> Studied</span>}
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="student-study-material-list">
+              {materialLessons.length === 0 ? (
+                <div className="empty-state-card"><BookIcon width={28} height={28} /><p>Published study notes will appear here.</p></div>
+              ) : materialLessons.map(({ lesson, chapterTitle }) => (
+                <article className="student-material-card" key={lesson.id}>
+                  <FileTextIcon width={20} height={20} />
+                  <div><strong>{lesson.title}</strong><span>{chapterTitle} · {lesson.teaching_date}</span></div>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={() => onSelectLesson(lesson.id)}>Open notes</button>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
       )}
     </div>
-  );
-}
-
-function ChevronUpIcon(props: any) {
-  return (
-    <svg width={props.width || 16} height={props.height || 16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="18 15 12 9 6 15" />
-    </svg>
   );
 }

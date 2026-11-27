@@ -4,6 +4,35 @@ from ila.auth import hash_password
 from ila.storage import Storage
 
 
+def test_school_catalogue_migration_keeps_classes_used_by_existing_accounts(tmp_path):
+    database = tmp_path / "ila.sqlite3"
+    store = Storage(database)
+    store.create_user(
+        full_name="Existing Class 9 Student",
+        role="student",
+        class_level=9,
+        student_identifier="S9",
+        password_hash=hash_password("school-secret"),
+    )
+    with store._connection() as db:
+        db.execute("UPDATE academic_classes SET is_active=0")
+        db.execute("UPDATE sections SET is_active=0")
+        db.execute("PRAGMA user_version=3")
+
+    migrated = Storage(database)
+    with migrated._connection() as db:
+        classes = {
+            row["class_level"]
+            for row in db.execute("SELECT class_level FROM academic_classes WHERE is_active=1")
+        }
+        sections = {
+            (row["class_level"], row["name"])
+            for row in db.execute("SELECT class_level,name FROM sections WHERE is_active=1")
+        }
+    assert classes == {9, 10}
+    assert sections == {(9, "A"), (10, "A")}
+
+
 def test_school_day(tmp_path, monkeypatch):
     store = Storage(tmp_path / "ila.sqlite3")
     monkeypatch.setattr(server, "_STORE", store)
@@ -21,12 +50,39 @@ def test_school_day(tmp_path, monkeypatch):
         return call("POST", "auth/login", {"identifier": identifier, "role_hint": role,"password": password})
 
     login("ADM","admin")
+    initial_school = call("GET","admin/school")
+    assert initial_school["classes"] == [
+        {"class_level": 10, "name": "Class 10", "academic_year": "2026-2027"}
+    ]
+    assert initial_school["sections"] == [{"class_level": 10, "name": "A"}]
+    curriculum = call("GET", "classes")
+    assert {course["class_level"] for course in curriculum} >= {9, 10, 11, 12}
+    assert any(chapter["class_level"] == 10 for chapter in call(
+        "GET", "classes/10/subjects/science/chapters"
+    ))
+
+    call("POST","admin/classes",{"class_level":12,"name":"Class 12","academic_year":"2026-2027"})
+    assert {"class_level": 12, "name": "A"} in call("GET", "admin/school")["sections"]
     call("POST","admin/sections",{"class_level":12,"name":"C"})
+    call("POST","admin/classes",{"class_level":9,"name":"Class 9","academic_year":"2026-2027"})
+    assert {"class_level": 9, "name": "A"} in call("GET", "admin/school")["sections"]
     for i in range(21):
         call("POST","admin/accounts",{"full_name":f"Learner {i}","identifier":f"S{i}","role":"student",
              "class_level":12 if i<20 else 9,"section":"C" if i<20 else "A","password":password})
     call("POST","admin/accounts",{"full_name":"Science Teacher","identifier":"T12","role":"teacher",
          "class_level":12,"section":"C","subject":"science","password":password})
+    directory = call("GET", "admin/school")
+    active_students = [
+        user for user in directory["users"] if user["role"] == "student" and user["active"]
+    ]
+    students_by_class = {
+        class_info["class_level"]: sum(
+            user["class_level"] == class_info["class_level"] for user in active_students
+        )
+        for class_info in directory["classes"]
+    }
+    assert sum(students_by_class.values()) == len(active_students) == 21
+    assert students_by_class == {9: 1, 10: 0, 12: 20}
     login("T12","teacher")
     call("GET","admin/school",status=403)
     assert call("GET","teacher/classes")[0]["students_count"] == 20

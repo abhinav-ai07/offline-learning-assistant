@@ -11,6 +11,7 @@ import { MySubjects } from "../features/student/subjects/MySubjects";
 import { StudentLessonView } from "../features/student/lessons/StudentLessonView";
 import { AskIlaView } from "../features/student/ask-ila/AskIlaView";
 import { PracticeQuizzesView } from "../features/student/practice/PracticeQuizzesView";
+import { StudentStudyBuilder } from "../features/student/study-builder/StudentStudyBuilder";
 import { StudentProgressView } from "../components/StudentProgressView";
 import { TeacherOverview } from "../features/teacher/overview/TeacherOverview";
 import { MyClasses } from "../features/teacher/classes/MyClasses";
@@ -103,6 +104,7 @@ export function AppRouter() {
     if (!user) return;
     if (user.role === "student") {
       if (currentPath.includes("/student/subjects")) setStudentSection("subjects");
+      else if (currentPath.includes("/student/builder")) setStudentSection("builder");
       else if (currentPath.includes("/student/ask")) setStudentSection("ask");
       else if (currentPath.includes("/student/practice")) setStudentSection("practice");
       else if (currentPath.includes("/student/progress")) setStudentSection("progress");
@@ -184,10 +186,12 @@ export function AppRouter() {
       if (activeLessonId) {
         breadcrumbItems.push({ label: "Classroom Lesson", active: true });
       }
+    } else if (studentSection === "builder") {
+      breadcrumbItems.push({ label: "Smart Study Builder", active: true });
     } else if (studentSection === "ask") {
-      breadcrumbItems.push({ label: "Ask ILA", active: true });
+      breadcrumbItems.push({ label: "Doubt & Question Center", active: true });
     } else if (studentSection === "practice") {
-      breadcrumbItems.push({ label: "Practice & Quizzes", active: true });
+      breadcrumbItems.push({ label: "Practice & Assessment", active: true });
     } else if (studentSection === "progress") {
       breadcrumbItems.push({ label: "My Progress", active: true });
     }
@@ -266,6 +270,8 @@ export function AppRouter() {
             />
           )}
 
+          {studentSection === "builder" && <StudentStudyBuilder user={user}/>}
+
           {studentSection === "practice" && (
             <PracticeQuizzesView lesson={quizLesson} user={user} />
           )}
@@ -297,6 +303,8 @@ export function AppRouter() {
     teacherBreadcrumbItems.push({ label: "Student Activity", active: true });
   } else if (teacherSection === "insights") {
     teacherBreadcrumbItems.push({ label: "Performance & Insights", active: true });
+  } else if (teacherSection === "settings") {
+    teacherBreadcrumbItems.push({ label: "Settings", active: true });
   }
 
   return (
@@ -343,6 +351,10 @@ export function AppRouter() {
         {teacherSection === "classes" && (
           <MyClasses
             user={user}
+            onNavigateInsights={() => {
+              setTeacherSection("insights");
+              navigateTo("/teacher/insights");
+            }}
             onOpenLesson={id => {
               setEditLesson(id);setTeacherSection("studio");
               navigateTo("/teacher/studio");

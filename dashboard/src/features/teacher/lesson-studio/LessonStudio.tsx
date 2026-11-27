@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -10,6 +10,7 @@ import {
 } from "../../../api";
 import { messageOf } from "../../../format";
 import type { AuthUser, ChapterInfo, DemoLine } from "../../../types";
+import { LoadingState } from "../../../shared/components/AcademicUI";
 import {
   ArrowLeftIcon,
   BookIcon,
@@ -49,11 +50,14 @@ export function LessonStudio({
   const [section, setSection] = useState<string>(user.section || "A");
   const [subject, setSubject] = useState<string>("science");
   const [assignments,setAssignments] = useState<{class_level:number;section:string;subject:string}[]>([]);
+  const [assignmentsLoading,setAssignmentsLoading] = useState(true);
+  const [lessonDetailsLoading,setLessonDetailsLoading] = useState(Boolean(lessonId));
   const [customChapter,setCustomChapter] = useState("");
   const [audioPath,setAudioPath] = useState<string>();
   const [chapters, setChapters] = useState<ChapterInfo[]>([]);
   const [selectedChapterNumber, setSelectedChapterNumber] = useState<number>(1);
   const [lessonTitle, setLessonTitle] = useState("");
+  const lessonTitleEdited = useRef(false);
   const [teachingDate, setTeachingDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   // Step 2: Audio State
@@ -80,30 +84,56 @@ export function LessonStudio({
   const [studioError, setStudioError] = useState<string | null>(null);
 
   useEffect(()=>{
+    let isCurrent = true;
+    setAssignmentsLoading(true);
+    setLessonDetailsLoading(Boolean(lessonId));
     getTeacherClasses().then(rows=>{
+      if (!isCurrent) return;
       setAssignments(rows);
       if(rows[0] && !lessonId){setClassLevel(rows[0].class_level);setSection(rows[0].section);setSubject(rows[0].subject);}
-    }).catch(e=>setStudioError(messageOf(e)));
+    }).catch(e=>{
+      if (isCurrent) setStudioError(messageOf(e));
+    }).finally(()=>{
+      if (isCurrent) setAssignmentsLoading(false);
+    });
     if(lessonId) getTeacherLesson(lessonId).then(l=>{
+      if (!isCurrent) return;
       setClassLevel(l.class_level);setSection(l.section);setSubject(l.subject);setSelectedChapterNumber(l.chapter_number);
-      setNotesResult(l.notes_json);setCustomChapter(l.chapter_title);setLessonTitle(l.title);setTeachingDate(l.teaching_date);setTranscript(l.transcript);setNotesMarkdown(l.notes_markdown);
-      setAudioPath(l.audio_path||undefined);setCreatedLessonId(l.id);setCurrentStep(6);
-    }).catch(e=>setStudioError(messageOf(e)));
+      setNotesResult(l.notes_json);setCustomChapter(l.chapter_title);setLessonTitle(l.title);lessonTitleEdited.current=true;setTeachingDate(l.teaching_date);setTranscript(l.transcript);setNotesMarkdown(l.notes_markdown);
+      setAudioPath(l.audio_path||undefined);setCreatedLessonId(l.id);setCurrentStep(6);setLessonDetailsLoading(false);
+    }).catch(e=>{
+      if (isCurrent) {
+        setStudioError(messageOf(e));
+        setLessonDetailsLoading(false);
+      }
+    });
+    return () => {
+      isCurrent = false;
+    };
   },[lessonId]);
   // Load chapters when classLevel or subject changes
   useEffect(() => {
+    if (assignmentsLoading || lessonDetailsLoading || (!assignments.length && !lessonId)) {
+      setChapters([]);
+      return;
+    }
+    let isCurrent = true;
     getClassChapters(classLevel, subject)
       .then((data) => {
+        if (!isCurrent) return;
         setChapters(data);
         if (data.length > 0 && !lessonId) {
           setSelectedChapterNumber(data[0].chapter_number);
-          if (!lessonTitle) {
-            setLessonTitle(`${data[0].title} — Lecture`);
-          }
+          if (!lessonTitleEdited.current) setLessonTitle(`${data[0].title} — Lecture`);
         }
       })
-      .catch(() => {});
-  }, [classLevel, subject]);
+      .catch((err) => {
+        if (isCurrent) setStudioError(messageOf(err));
+      });
+    return () => {
+      isCurrent = false;
+    };
+  }, [assignments.length, assignmentsLoading, classLevel, lessonDetailsLoading, lessonId, subject]);
 
   const activeChapter = chapters.find((c) => c.chapter_number === selectedChapterNumber) || {
     chapter_number: selectedChapterNumber,
@@ -263,6 +293,19 @@ export function LessonStudio({
     }
   };
 
+  if (assignmentsLoading || lessonDetailsLoading) {
+    return <LoadingState>Loading teaching assignment…</LoadingState>;
+  }
+  if (!assignments.length && !lessonId) {
+    return (
+      <div className="empty-state-card">
+        <h3>No teaching assignment available</h3>
+        <p>Ask your school administrator to assign a class before creating a lesson.</p>
+        {studioError && <p role="alert">{studioError}</p>}
+      </div>
+    );
+  }
+
   return (
     <div className="lesson-studio-container">
       {/* Studio Header */}
@@ -331,7 +374,7 @@ export function LessonStudio({
                     const num = Number(e.target.value);
                     setSelectedChapterNumber(num);
                     const ch = chapters.find((c) => c.chapter_number === num);
-                    if (ch) setLessonTitle(`${ch.title} — Lecture`);
+                    if (ch && !lessonTitleEdited.current) setLessonTitle(`${ch.title} — Lecture`);
                   }}
                 >
                   <option value={Math.max(0,...chapters.map(c=>c.chapter_number))+1}>New chapter</option>
@@ -362,7 +405,7 @@ export function LessonStudio({
                 className="form-input"
                 placeholder="e.g. Chemical Reactions and Equations — Types of Reactions"
                 value={lessonTitle}
-                onChange={(e) => setLessonTitle(e.target.value)}
+                onChange={(e) => { lessonTitleEdited.current = true; setLessonTitle(e.target.value); }}
                 required
               />
               <small className="form-hint">A clear title helps students locate today's material in their dashboard.</small>

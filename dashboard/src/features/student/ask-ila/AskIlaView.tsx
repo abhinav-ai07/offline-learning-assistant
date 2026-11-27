@@ -33,6 +33,7 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const studentName = user.full_name.split(/\s+/).map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(" ");
 
   // Attached lesson context if coming from a specific classroom lesson
   const [attachedLesson, setAttachedLesson] = useState<LessonDetail | null>(initialLesson || null);
@@ -52,7 +53,7 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
       {
         id: "intro-default",
         sender: "ila",
-        text: `Hello ${user.full_name.split(" ")[0]}! I am your Offline Intelligent Lecture Assistant (ILA). Ask me any questions grounded in your NCERT curriculum and classroom lectures.`,
+        text: `Hello ${studentName.split(" ")[0]}! I am your Offline Intelligent Lecture Assistant (ILA). Ask me any questions grounded in your NCERT curriculum and classroom lectures.`,
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       },
     ];
@@ -142,52 +143,56 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
 
   return (
     <div className="ask-ila-workspace">
-      {/* Header bar */}
-      <div className="ask-header-bar">
-        <div>
-          <h2>Ask ILA — Doubt Solving Workspace</h2>
+      <header className="ask-page-header">
+        <div className="ask-page-heading">
+          <h2>Doubt &amp; Question Center</h2>
           <p className="header-subtitle">
-            Local grounded Q&amp;A: all answers cite classroom lecture transcripts and verified NCERT textbooks.
+            Get instant, reliable answers from ILA for your subject and chapter. Ask doubts, clarify concepts, or ask any academic question.
           </p>
         </div>
+        <svg className="ask-ila-illustration" viewBox="0 0 430 150" aria-hidden="true">
+          <path d="M0 112c54-39 99-26 145-4 42 21 91 12 133-15 47-31 93-31 152-1v58H0z" fill="#e1f3e7" />
+          <path d="M55 120c47-23 84-17 127 1 43 18 92 5 137-21 34-19 68-17 111 2v48H55z" fill="#c8e8d5" />
+          <rect x="260" y="46" width="91" height="59" rx="8" fill="#fff" stroke="#07835d" strokeWidth="5" />
+          <path d="M278 66h53m-53 14h42m-42 14h49" stroke="#60ad83" strokeWidth="5" strokeLinecap="round" />
+          <path d="M307 42V23a5 5 0 0 1 5-5h53a5 5 0 0 1 5 5v38" fill="#fff" stroke="#07835d" strokeWidth="5" />
+          <path d="M317 33h39m-39 12h28" stroke="#60ad83" strokeWidth="4" strokeLinecap="round" />
+          <rect x="332" y="76" width="64" height="49" rx="8" fill="#fff" stroke="#07835d" strokeWidth="5" />
+          <circle cx="349" cy="90" r="4" fill="#69b38a" />
+          <path d="m340 116 15-14 11 10 10-12 12 16" fill="none" stroke="#60ad83" strokeWidth="4" />
+          <rect x="176" y="96" width="65" height="15" rx="4" fill="#07835d" />
+          <rect x="168" y="81" width="75" height="16" rx="4" fill="#fff" stroke="#78bd94" strokeWidth="3" />
+          <rect x="182" y="66" width="61" height="15" rx="4" fill="#73bd91" />
+        </svg>
+      </header>
 
-        {attachedLesson ? (
-          <div className="attached-context-badge">
-            <BookIcon width={14} height={14} />
-            <span>Context: <strong>{attachedLesson.title}</strong></span>
-            <button
-              type="button"
-              className="btn-link-subtle"
-              onClick={() => setAttachedLesson(null)}
-            >
-              Clear Lesson
-            </button>
-          </div>
-        ) : (
-          <div className="context-selector-row">
-            <select
-              className="form-select form-select-sm"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-            >
-              {subjects.map(s=><option key={s.code} value={s.code}>{s.name}</option>)}
+      {attachedLesson ? (
+        <div className="attached-context-badge">
+          <BookIcon width={14} height={14} />
+          <span>Context: <strong>{attachedLesson.title}</strong></span>
+          <button type="button" className="btn-link-subtle" onClick={() => setAttachedLesson(null)}>Clear Lesson</button>
+        </div>
+      ) : (
+        <div className="ask-context-selectors">
+          <label>
+            Subject
+            <select value={subject} onChange={(e) => setSubject(e.target.value)}>
+              {subjects.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
             </select>
-
-            <select
-              className="form-select form-select-sm"
-              value={chapter || ""}
-              onChange={(e) => setChapter(Number(e.target.value))}
-            >
+          </label>
+          <label>
+            Chapter
+            <select value={chapter || ""} onChange={(e) => setChapter(Number(e.target.value))}>
               <option value="">General NCERT Curriculum</option>
               {chaptersList.map((ch) => (
                 <option key={ch.chapter_number} value={ch.chapter_number}>
-                  Ch {ch.chapter_number}: {ch.title}
+                  {ch.title}
                 </option>
               ))}
             </select>
-          </div>
-        )}
-      </div>
+          </label>
+        </div>
+      )}
 
       {/* Chat Messages Log */}
       <div className="chat-messages-scroll-area">
@@ -203,7 +208,7 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
             <div className="chat-bubble-content">
               <div className="chat-bubble-header">
                 <span className="chat-sender-name">
-                  {msg.sender === "student" ? user.full_name : "ILA Assistant"}
+                  {msg.sender === "student" ? studentName : "ILA Assistant"}
                 </span>
                 <span className="chat-timestamp">{msg.timestamp}</span>
               </div>
@@ -252,23 +257,30 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
         <button
           type="button"
           className="quick-prompt-chip"
-          onClick={() => handleQuickQuestion("What are the key definitions and formulas in this chapter?")}
+          onClick={() => handleQuickQuestion("Explain the main concept in this chapter in simple terms.")}
         >
-          Key definitions &amp; formulas
+          Explain the concept
         </button>
         <button
           type="button"
           className="quick-prompt-chip"
-          onClick={() => handleQuickQuestion("Explain with an example how this concept is applied in NCERT questions.")}
+          onClick={() => handleQuickQuestion("Solve a numerical problem from this chapter step by step.")}
         >
-          Explain with an example
+          Solve a numerical
+        </button>
+        <button
+          type="button"
+          className="quick-prompt-chip"
+          onClick={() => handleQuickQuestion("Give a clear example that applies a concept from this chapter.")}
+        >
+          Give an example
         </button>
         <button
           type="button"
           className="quick-prompt-chip"
           onClick={() => handleQuickQuestion("What are common mistakes students make in this topic?")}
         >
-          Common mistakes to avoid
+          Common mistakes
         </button>
       </div>
 
@@ -277,7 +289,7 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
         <input
           type="text"
           className="chat-input"
-          placeholder="Type your academic question or doubt here..."
+          placeholder="Type your doubt or question here..."
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           disabled={loading}
@@ -288,6 +300,7 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
           className="btn btn-primary btn-send"
           disabled={loading || !question.trim()}
         >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
           Ask Question
         </button>
       </form>

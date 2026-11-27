@@ -338,35 +338,9 @@ export function PracticeQuizzesView({ user,lesson }: PracticeQuizzesViewProps) {
                   value={launchSubject}
                   onChange={(e) => setLaunchSubject(e.target.value)}
                 >
-                  
                   {subjects.map(s=><option key={s.code} value={s.code}>{s.name}</option>)}
-                </select>{lesson?<p>{lesson.title}</p>:<label>Chapter number (optional)<input type="number" min="1" value={chapter||""} onChange={e=>setChapter(Number(e.target.value)||undefined)}/></label>}
+                </select>{lesson&&<p>{lesson.title}</p>}
               </div>
-
-              <div className="form-group">
-                <label>Topic / Concept (Optional)</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. Chemical Reactions, Acids, Real Numbers"
-                  value={launchTopic}
-                  onChange={(e) => setLaunchTopic(e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Difficulty</label>
-                <select
-                  className="form-select"
-                  value={launchDifficulty}
-                  onChange={(e) => setLaunchDifficulty(Number(e.target.value))}
-                >
-                  <option value={1}>Level 1: Recall &amp; Definitions</option>
-                  <option value={2}>Level 2: Conceptual &amp; Equations</option>
-                  <option value={3}>Level 3: Application &amp; Analysis</option>
-                </select>
-              </div>
-
               <div className="form-group">
                 <label>Number of Questions</label>
                 <select
@@ -380,6 +354,37 @@ export function PracticeQuizzesView({ user,lesson }: PracticeQuizzesViewProps) {
                 </select>
               </div>
             </div>
+
+            <details className="quiz-advanced-options">
+              <summary>Optional topic and difficulty</summary>
+              <div className="launch-controls-grid">
+                {!lesson&&<div className="form-group">
+                  <label>Chapter number (optional)<input type="number" min="1" value={chapter||""} onChange={e=>setChapter(Number(e.target.value)||undefined)}/></label>
+                </div>}
+                <div className="form-group">
+                  <label>Topic / Concept (Optional)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Chemical Reactions, Acids, Real Numbers"
+                    value={launchTopic}
+                    onChange={(e) => setLaunchTopic(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Difficulty</label>
+                  <select
+                    className="form-select"
+                    value={launchDifficulty}
+                    onChange={(e) => setLaunchDifficulty(Number(e.target.value))}
+                  >
+                    <option value={1}>Level 1: Recall &amp; Definitions</option>
+                    <option value={2}>Level 2: Conceptual &amp; Equations</option>
+                    <option value={3}>Level 3: Application &amp; Analysis</option>
+                  </select>
+                </div>
+              </div>
+            </details>
 
             <button
               type="button"

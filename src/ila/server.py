@@ -758,9 +758,18 @@ class SchoolClass(BaseModel):
 @app.post("/api/admin/classes")
 def save_class(item: SchoolClass, admin: Annotated[dict,Depends(require_admin)]):
     with _store()._connection() as db:
-        db.execute("""INSERT INTO academic_classes VALUES (?,?,?,?) ON CONFLICT(class_level)
-                      DO UPDATE SET name=excluded.name,academic_year=excluded.academic_year""",
-                   (f"class-{item.class_level}",item.class_level,item.name.strip(),item.academic_year.strip()))
+        db.execute(
+            """INSERT INTO academic_classes
+               (id,class_level,name,academic_year,is_active) VALUES (?,?,?,?,1)
+               ON CONFLICT(class_level) DO UPDATE SET name=excluded.name,
+               academic_year=excluded.academic_year,is_active=1""",
+            (f"class-{item.class_level}",item.class_level,item.name.strip(),item.academic_year.strip()),
+        )
+        db.execute(
+            """INSERT INTO sections (id,class_level,name,is_active) VALUES (?,?, 'A',1)
+               ON CONFLICT(class_level,name) DO UPDATE SET is_active=1""",
+            (f"sec-{item.class_level}-A",item.class_level),
+        )
     return {"status":"ok"}
 
 
@@ -777,9 +786,13 @@ def school_directory(admin: Annotated[dict, Depends(require_admin)]):
                         u.section,is_active AS active,COALESCE(group_concat(a.subject), '') AS subject
                         FROM users u LEFT JOIN teacher_class_assignments a ON a.teacher_id=u.id
                         WHERE role IN ('student','teacher') GROUP BY u.id ORDER BY full_name""",
-            "classes":"SELECT class_level,name,academic_year FROM academic_classes ORDER BY class_level",
-            "sections": "SELECT class_level,name FROM sections ORDER BY class_level,name",
-            "subjects": "SELECT class_level,code,name FROM subjects ORDER BY class_level,name"
+            "classes":"SELECT class_level,name,academic_year FROM academic_classes WHERE is_active=1 ORDER BY class_level",
+            "sections": """SELECT s.class_level,s.name FROM sections s
+                           JOIN academic_classes c USING(class_level)
+                           WHERE s.is_active=1 AND c.is_active=1 ORDER BY s.class_level,s.name""",
+            "subjects": """SELECT class_level,code,name FROM subjects
+                           WHERE class_level IN (SELECT class_level FROM academic_classes WHERE is_active=1)
+                           ORDER BY class_level,name"""
         }.items()}
 
 
@@ -789,8 +802,16 @@ def add_section(item: SchoolSection, admin: Annotated[dict, Depends(require_admi
     if not name:
         raise HTTPException(422, "Enter a section name")
     with _store()._connection() as db:
-        db.execute("INSERT OR IGNORE INTO sections VALUES (?,?,?)",
-                   (f"sec-{item.class_level}-{name}", item.class_level, name))
+        if not db.execute(
+            "SELECT 1 FROM academic_classes WHERE class_level=? AND is_active=1",
+            (item.class_level,),
+        ).fetchone():
+            raise HTTPException(422, "Add this class before creating its sections")
+        db.execute(
+            """INSERT INTO sections (id,class_level,name,is_active) VALUES (?,?,?,1)
+               ON CONFLICT(class_level,name) DO UPDATE SET is_active=1""",
+            (f"sec-{item.class_level}-{name}",item.class_level,name),
+        )
     return {"status": "ok"}
 
 
@@ -808,7 +829,11 @@ def save_school_account(item: SchoolAccount, admin: Annotated[dict, Depends(requ
     now = datetime.now(timezone.utc).isoformat()
     with _store()._connection() as db:
         db.execute("BEGIN IMMEDIATE")
-        if not db.execute("SELECT 1 FROM sections WHERE class_level=? AND name=?", (item.class_level,item.section)).fetchone():
+        if not db.execute(
+            """SELECT 1 FROM sections s JOIN academic_classes c USING(class_level)
+               WHERE s.class_level=? AND s.name=? AND s.is_active=1 AND c.is_active=1""",
+            (item.class_level,item.section),
+        ).fetchone():
             raise HTTPException(422, "Unknown class or section")
         if item.role == "teacher" and not db.execute("SELECT 1 FROM subjects WHERE class_level=? AND code=?", (item.class_level,item.subject)).fetchone():
             raise HTTPException(422, "Select an assigned subject")
@@ -840,6 +865,16 @@ def save_school_account(item: SchoolAccount, admin: Annotated[dict, Depends(requ
             db.execute("DELETE FROM teacher_class_assignments WHERE teacher_id=?", (account_id,))
             db.execute("INSERT INTO teacher_class_assignments VALUES (?,?,?,?,?)", (uuid4().hex,account_id,item.class_level,item.section,item.subject))
     return {"id": account_id}
+
+
+@app.delete("/api/admin/accounts/{account_id}")
+def delete_school_account(
+    account_id: str,
+    admin: Annotated[dict, Depends(require_admin)],
+) -> dict[str, str]:
+    if not _store().delete_school_account(account_id):
+        raise HTTPException(404, "Student or teacher account unavailable")
+    return {"status": "ok"}
 
 
 @app.post("/api/auth/login")
