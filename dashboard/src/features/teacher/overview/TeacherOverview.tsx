@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
-<<<<<<< HEAD
 import { getTeacherOverview, getTeacherLessons, getTeacherClasses } from "../../../api";
-=======
-import { getTeacherOverview,getTeacherLessons } from "../../../api";
 import { subscribeRealtime } from "../../../realtime";
->>>>>>> origin/main
 import { messageOf } from "../../../format";
 import type {
   AuthUser,
@@ -56,29 +52,15 @@ export function TeacherOverview({
 
   useEffect(() => {
     let isMounted = true;
-<<<<<<< HEAD
-    Promise.all([getTeacherOverview(), getTeacherLessons(), getTeacherClasses()])
-      .then(([overview, lessons, classes]) => {
-        if (!isMounted) return;
-        setData(overview);
-        setAllLessons(lessons);
-        setRecentLessons(lessons.filter((lesson) => lesson.status === "published").slice(0, 1));
-        setClassDetails(classes);
-        setError(null);
-      })
-      .catch((err) => {
-        if (isMounted) setError(messageOf(err));
-      })
-      .finally(() => {
-        if (isMounted) setLoading(false);
-      });
-=======
     const loadOverview = (silent = false) => {
       if (!silent) setLoading(true);
-      Promise.all([getTeacherOverview(),getTeacherLessons({status:"published"})])
-        .then(([res,lessons]) => {
+      Promise.all([getTeacherOverview(), getTeacherLessons(), getTeacherClasses()])
+        .then(([overview, lessons, classes]) => {
           if (isMounted) {
-            setData(res);setRecentLessons(lessons.slice(0,4));
+            setData(overview);
+            setAllLessons(lessons);
+            setRecentLessons(lessons.filter((lesson) => lesson.status === "published").slice(0, 4));
+            setClassDetails(classes);
             setError(null);
           }
         })
@@ -94,7 +76,6 @@ export function TeacherOverview({
       ["student_activity", "quiz_updated", "lesson_published", "lesson_updated", "lesson_archived"],
       () => loadOverview(true),
     );
->>>>>>> origin/main
     return () => {
       isMounted = false;
       unsub();

@@ -8,7 +8,6 @@
    1. DESIGN TOKENS (VARIABLES)
    -------------------------------------------------------------------------- */
 :root {
-<<<<<<< HEAD
   /* Surface & Background Palette (Deep Slate) */
   --bg-app: #111b1d;
   --bg-sidebar: #142326;
@@ -39,38 +38,6 @@
   --accent-subtle: rgba(43, 163, 145, 0.12);
   --accent-border: rgba(77, 185, 166, 0.3);
   --accent-text: #72c8b7;
-=======
-  /* Surface & Background Palette (Deep Obsidian / Forest Black) */
-  --bg-app: #060908;
-  --bg-sidebar: #080f0c;
-  --bg-surface: #0b1310;
-  --bg-surface-subtle: #101c17;
-  --bg-surface-elevated: #14241e;
-  --bg-surface-hover: #182b23;
-  --bg-surface-active: #1d342b;
-  --bg-input: #080e0b;
-
-  /* Borders (Restrained, Crisp, Green-Tinted) */
-  --border-subtle: rgba(140, 210, 178, 0.08);
-  --border-default: rgba(140, 210, 178, 0.14);
-  --border-strong: rgba(140, 210, 178, 0.24);
-  --border-focus: #22a089;
-
-  /* Typography Colors */
-  --text-primary: #ecf5f0;
-  --text-secondary: #a3bdb2;
-  --text-muted: #6f8f81;
-  --text-dim: #4c685c;
-  --text-inverse: #060908;
-
-  /* Accent Palette (Forest Teal / Emerald Green) */
-  --accent: #187a6e;
-  --accent-hover: #1f9385;
-  --accent-active: #146359;
-  --accent-subtle: rgba(34, 160, 137, 0.14);
-  --accent-border: rgba(52, 211, 153, 0.3);
-  --accent-text: #5eead4;
->>>>>>> origin/main
 
   /* Semantic State Colors */
   --success: #10b981;
@@ -236,14 +203,9 @@ code {
   font-size: 0.88em;
   padding: 2px 6px;
   border-radius: var(--radius-xs);
-<<<<<<< HEAD
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-=======
   background: var(--bg-surface-subtle);
   color: var(--text-primary);
   border: 1px solid var(--border-subtle);
->>>>>>> origin/main
 }
 
 pre {
@@ -251,14 +213,9 @@ pre {
   font-size: 0.85rem;
   padding: 14px;
   border-radius: var(--radius-md);
-<<<<<<< HEAD
-  background: var(--bg-input);
-  border: 1px solid var(--border-subtle);
-=======
   background: var(--bg-surface-subtle);
   color: var(--text-primary);
   border: 1px solid var(--border-default);
->>>>>>> origin/main
   overflow-x: auto;
   line-height: 1.6;
 }
@@ -289,11 +246,7 @@ pre code {
   border-left: 3px solid var(--accent);
   background: var(--accent-subtle);
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
-<<<<<<< HEAD
   color: var(--accent-text);
-=======
-  color: var(--text-primary);
->>>>>>> origin/main
 }
 .markdown table {
   width: 100%;
@@ -321,11 +274,7 @@ pre code {
 }
 .katex {
   font-size: 1.05em;
-<<<<<<< HEAD
   color: var(--accent-text) !important;
-=======
-  color: inherit !important;
->>>>>>> origin/main
 }
 
 /* --------------------------------------------------------------------------
@@ -376,11 +325,7 @@ pre code {
 .btn-primary:hover:not(:disabled), .btn.primary:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent);
-<<<<<<< HEAD
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
-=======
   box-shadow: 0 2px 8px var(--accent-border);
->>>>>>> origin/main
 }
 
 .btn-secondary, .btn.secondary {
@@ -653,11 +598,7 @@ pre code {
   width: 28px;
   height: 28px;
   border-radius: var(--radius-sm);
-<<<<<<< HEAD
-  background: linear-gradient(135deg, #0b2545, #1d4ed8);
-=======
   background: linear-gradient(135deg, #0f4c45, #187a6e);
->>>>>>> origin/main
   color: #ffffff;
   border: 1px solid var(--accent-border);
 }
@@ -2856,11 +2797,7 @@ pre code {
   width: 52px;
   height: 52px;
   border-radius: var(--radius-lg);
-<<<<<<< HEAD
-  background: linear-gradient(135deg, #1d4ed8 0%, #0b2545 100%);
-=======
   background: linear-gradient(135deg, var(--accent) 0%, #0f4c45 100%);
->>>>>>> origin/main
   display: flex;
   align-items: center;
   justify-content: center;
@@ -7786,17 +7723,7 @@ pre code {
     max-width: 100%;
   }
 }
-<<<<<<< HEAD
-[data-theme="light"] { --bg-app:#f4f6f4; --bg-sidebar:#edf1ee; --bg-surface:#ffffff; --text-primary:#1a2b2b; --accent:#16786c; --accent-hover:#11665c; }
-.school { min-height:100vh; background:#f4f6f4; color:#1a2b2b; font:16px/1.55 system-ui,sans-serif; }
-.school header { background:linear-gradient(90deg,#17343a,#1b4143);color:white;padding:1rem clamp(1rem,6vw,6rem);display:flex;align-items:center;justify-content:space-between;font-weight:650; }
-.school section {max-width:1060px;margin:auto;padding:clamp(1rem,5vw,4rem);overflow-x:auto;}
-.school.entry section {max-width:540px;margin:6vh auto;}
-.school nav {display:flex;flex-wrap:wrap;gap:1rem;border-bottom:1px solid #dce5df;margin-bottom:2rem;}
-.school nav :is(a,button) {padding:.6rem 0;background:transparent;color:#536462;text-decoration:none;border:0;border-bottom:3px solid transparent;border-radius:0;}
-.school nav [aria-current=page] {border-color:#16786c;color:#126b60;}
-=======
-[data-theme="light"] { --bg-app:#f8f7f1; --bg-sidebar:#f0f1eb; --bg-surface:#fffef9; --text-primary:#192f44; --accent:#126b68; --accent-hover:#125955; }
+[data-theme="light"] { --bg-app:#f4f6f4; --bg-sidebar:#edf1ee; --bg-surface:#ffffff; --text-primary:#1a2b2b; --accent:#16786c; --accent-hover:#11665c; --accent-text:#126b60; }
 .school { min-height:100vh; background:var(--bg-app); color:var(--text-primary); font:16px/1.55 system-ui,sans-serif; }
 .school header { background:#0b1f1a;color:white;padding:1rem clamp(1rem,6vw,6rem);display:flex;align-items:center;justify-content:space-between;font-weight:650; }
 [data-theme="light"] .school header { background:#18364a; }
@@ -7805,26 +7732,12 @@ pre code {
 .school nav {display:flex;flex-wrap:wrap;gap:1rem;border-bottom:1px solid var(--border-default);margin-bottom:2rem;}
 .school nav :is(a,button) {padding:.6rem 0;background:transparent;color:var(--text-secondary);text-decoration:none;border:0;border-bottom:3px solid transparent;border-radius:0;}
 .school nav [aria-current=page] {border-color:var(--accent);color:var(--accent-text);}
->>>>>>> origin/main
 .school h1,.school h2,[data-theme="light"] .page-title {font-family:Georgia,serif;font-weight:500;}
 .school h1 {font-size:2.3rem;margin:.8rem 0;}
 .school form {display:grid;gap:1rem;max-width:32rem;margin:1.5rem 0;}
 .school label {display:grid;gap:.3rem;font-weight:550;}
-<<<<<<< HEAD
-.school :is(input,select) {padding:.65rem;background:#ffffff;color:#1a2b2b;border:1px solid #cad7d1;border-radius:4px;font:inherit;}
-.school button {background:#16786c;color:white;padding:.55rem 1rem;border:0;border-radius:6px;font-weight:600;transition:background .15s,box-shadow .15s;cursor:pointer;font:inherit;}
-.school table {width:100%;border-collapse:collapse;margin-top:1rem;}
-.school :is(td,th) {text-align:left;border-bottom:1px solid #e1e7df;padding:.65rem;}
-.school dl {display:flex;flex-wrap:wrap;gap:2rem;}
-.school dd {margin:0;font:2.4rem Georgia,serif;}
-.school :focus-visible {outline:3px solid #2563eb;outline-offset:3px;}
-.password-panel.school {position:fixed;inset:0;z-index:100;min-height:0;background:rgba(18,39,39,.7);display:grid;place-items:center;}
-.password-panel.school form {background:#ffffff;padding:2rem;width:min(94vw,25rem);border-radius:6px;}
-[data-theme=light] .portal-sidebar {background:linear-gradient(180deg,#17343a,#1b4143);border-right:0;color:#fff;}
-[data-theme=light] .portal-sidebar .nav-button.active {background:#f4f6f4;color:#17343a;font-weight:600;box-shadow:inset 3px 0 #39a18d;}
-=======
 .school :is(input,select) {padding:.65rem;background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-default);border-radius:4px;font:inherit;}
-.school button {background:var(--accent);color:white;padding:.55rem 1rem;border:0;border-radius:4px;cursor:pointer;font:inherit;}
+.school button {background:var(--accent);color:white;padding:.55rem 1rem;border:0;border-radius:6px;font-weight:600;transition:background .15s,box-shadow .15s;cursor:pointer;font:inherit;}
 .school table {width:100%;border-collapse:collapse;margin-top:1rem;}
 .school :is(td,th) {text-align:left;border-bottom:1px solid var(--border-default);padding:.65rem;}
 .school dl {display:flex;flex-wrap:wrap;gap:2rem;}
@@ -7832,18 +7745,15 @@ pre code {
 .school :focus-visible {outline:3px solid var(--border-focus);outline-offset:3px;}
 .password-panel.school {position:fixed;inset:0;z-index:100;min-height:0;background:rgba(6, 12, 10, 0.72);display:grid;place-items:center;}
 .password-panel.school form {background:var(--bg-surface);padding:2rem;width:min(94vw,25rem);border-radius:6px;}
-[data-theme=light] .portal-sidebar {background:#eff1eb;border-right:1px solid #d3d9ce;}
-[data-theme=light] .portal-sidebar .nav-button.active {background:#d9ebe5;color:#125853;}
->>>>>>> origin/main
+[data-theme="light"] .portal-sidebar {background:var(--bg-sidebar);border-right:1px solid var(--border-default);color:var(--text-primary);}
+[data-theme="light"] .portal-sidebar .nav-button.active {background:var(--accent-subtle);color:var(--accent-text);box-shadow:inset 3px 0 var(--accent);}
 [data-theme=light] .portal-container :is(h1,h2,.brand-app-name){font-family:Georgia,serif;letter-spacing:-.02em;}
 [data-theme=light] .portal-container table th {background:#edf3ef;color:#17343a;letter-spacing:.035em;}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important;}}
 .audio-bars{display:inline-flex;align-items:center;gap:3px;height:20px}.audio-bars i{width:3px;height:16px;background:var(--accent);animation:audio-level .8s ease-in-out infinite alternate}@keyframes audio-level{from{transform:scaleY(.2)}to{transform:scaleY(1)}}
 
-<<<<<<< HEAD
 .school button:hover{background:#11665c;box-shadow:0 2px 8px rgba(22,120,108,.24)}
 .school .password-field button:hover{background:#dcece5;box-shadow:none}
-=======
 /* Student Audio Notes & Auto-Chapter Sorting */
 .student-transcribe-container {
   max-width: 1100px;
@@ -7964,4 +7874,3 @@ pre code {
   vertical-align: middle;
   animation: pulse-dot 1s infinite;
 }
->>>>>>> origin/main

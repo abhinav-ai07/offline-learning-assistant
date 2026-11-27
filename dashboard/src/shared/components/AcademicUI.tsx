@@ -7,7 +7,10 @@ export function PageHeader({title,description}:{title:string;description:string}
 }
 export function PasswordInput(props:InputHTMLAttributes<HTMLInputElement>){
   const [visible,setVisible]=useState(false);
-  return <span className="password-field"><input {...props} type={visible?"text":"password"}/><button type="button" aria-label={visible?"Hide password":"Show password"} aria-pressed={visible} onClick={()=>setVisible(!visible)}>{visible?"Hide":"Show"}</button></span>;
+  return <span className="password-field" style={{display:"flex",width:"100%",minWidth:0,alignItems:"stretch"}}>
+    <input {...props} type={visible?"text":"password"} style={{...props.style,flex:"1 1 0%",width:0,minWidth:0}}/>
+    <button type="button" aria-label={visible?"Hide password":"Show password"} aria-pressed={visible} onClick={()=>setVisible(!visible)} style={{flex:"0 0 auto",width:"auto",minWidth:56,whiteSpace:"nowrap"}}>{visible?"Hide":"Show"}</button>
+  </span>;
 }
 export function Dialog({title,close,children}:{title:string;close:()=>void;children:ReactNode}){
   const ref=useRef<HTMLDialogElement>(null);

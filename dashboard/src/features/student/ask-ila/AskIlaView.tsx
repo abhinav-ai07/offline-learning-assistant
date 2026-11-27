@@ -166,7 +166,6 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
         </svg>
       </header>
 
-<<<<<<< HEAD
       {attachedLesson ? (
         <div className="attached-context-badge">
           <BookIcon width={14} height={14} />
@@ -177,47 +176,20 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
         <div className="ask-context-selectors">
           <label>
             Subject
-            <select value={subject} onChange={(e) => setSubject(e.target.value)}>
-              {subjects.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
-            </select>
-          </label>
-          <label>
-            Chapter
-            <select value={chapter || ""} onChange={(e) => setChapter(Number(e.target.value))}>
-              <option value="">General NCERT Curriculum</option>
-=======
-        {attachedLesson ? (
-          <div className="attached-context-badge">
-            <BookIcon width={14} height={14} />
-            <span>Context: <strong>{attachedLesson.title}</strong></span>
-            <button
-              type="button"
-              className="btn-link-subtle"
-              onClick={() => setAttachedLesson(null)}
-            >
-              Clear Lesson
-            </button>
-          </div>
-        ) : (
-          <div className="context-selector-row">
             <select
-              className="form-select form-select-sm"
               value={subject}
               onChange={(e) => {
                 setSubject(e.target.value);
                 setChapter(null);
               }}
             >
-              {subjects.map(s=><option key={s.code} value={s.code}>{s.name}</option>)}
+              {subjects.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
             </select>
-
-            <select
-              className="form-select form-select-sm"
-              value={chapter ?? ""}
-              onChange={(e) => setChapter(e.target.value ? Number(e.target.value) : null)}
-            >
+          </label>
+          <label>
+            Chapter
+            <select value={chapter ?? ""} onChange={(e) => setChapter(e.target.value ? Number(e.target.value) : null)}>
               <option value="">General Subject &amp; NCERT Curriculum</option>
->>>>>>> origin/main
               {chaptersList.map((ch) => (
                 <option key={ch.chapter_number} value={ch.chapter_number}>
                   {ch.title}

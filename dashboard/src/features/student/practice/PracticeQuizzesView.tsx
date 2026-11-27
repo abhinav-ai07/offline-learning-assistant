@@ -339,52 +339,8 @@ export function PracticeQuizzesView({ user,lesson }: PracticeQuizzesViewProps) {
                   onChange={(e) => setLaunchSubject(e.target.value)}
                 >
                   {subjects.map(s=><option key={s.code} value={s.code}>{s.name}</option>)}
-<<<<<<< HEAD
                 </select>{lesson&&<p>{lesson.title}</p>}
               </div>
-=======
-                </select>
-                {lesson && <p>{lesson.title}</p>}
-              </div>
-
-              {!lesson && (
-                <div className="form-group">
-                  <label>Chapter number (optional)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="All chapters"
-                    value={chapter || ""}
-                    onChange={(e) => setChapter(Number(e.target.value) || undefined)}
-                  />
-                </div>
-              )}
-
-              <div className="form-group">
-                <label>Topic / Concept (Optional)</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. Chemical Reactions, Acids, Real Numbers"
-                  value={launchTopic}
-                  onChange={(e) => setLaunchTopic(e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Difficulty</label>
-                <select
-                  className="form-select"
-                  value={launchDifficulty}
-                  onChange={(e) => setLaunchDifficulty(Number(e.target.value))}
-                >
-                  <option value={1}>Level 1: Recall &amp; Definitions</option>
-                  <option value={2}>Level 2: Conceptual &amp; Equations</option>
-                  <option value={3}>Level 3: Application &amp; Analysis</option>
-                </select>
-              </div>
-
->>>>>>> origin/main
               <div className="form-group">
                 <label>Number of Questions</label>
                 <select

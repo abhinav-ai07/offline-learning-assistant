@@ -12,6 +12,7 @@ import {
   CpuIcon,
   GraduationCapIcon,
   HelpCircleIcon,
+  FileTextIcon,
   LogOutIcon,
   MoonIcon,
   SearchIcon,
@@ -22,11 +23,7 @@ import {
 import { Breadcrumbs, type BreadcrumbItem } from "../components/Breadcrumbs";
 import { markNotificationRead } from "../../api";
 
-<<<<<<< HEAD
-export type StudentNavSection = "overview" | "subjects" | "builder" | "ask" | "practice" | "progress";
-=======
-export type StudentNavSection = "overview" | "subjects" | "transcribe" | "ask" | "practice" | "progress";
->>>>>>> origin/main
+export type StudentNavSection = "overview" | "subjects" | "builder" | "transcribe" | "ask" | "practice" | "progress";
 
 interface StudentLayoutProps {
   user: AuthUser;
@@ -86,10 +83,9 @@ export function StudentLayout({
     setShowNotifications(false);
   };
 
-<<<<<<< HEAD
   return <PortalShell portal="Student" name={user.full_name} portalIcon={<GraduationCapIcon width={22} height={22}/>} active={currentSection} navigate={onNavigate}
-    items={[[ "overview","Overview"],["subjects","My Subjects"],["builder","Smart Study Builder"],["ask","Doubt & Question Center"],["practice","Practice & Assessment"],["progress","My Progress"]]}
-    renderNavItem={(key,label)=><><span className="student-nav-icon">{key==="overview"?<GraduationCapIcon/>:key==="subjects"?<BookIcon/>:key==="builder"?<CpuIcon/>:key==="ask"?<HelpCircleIcon/>:key==="practice"?<CheckCircleIcon/>:<BarChartIcon/>}</span><span>{label}</span></>}
+    items={[[ "overview","Overview"],["subjects","My Subjects"],["builder","Smart Study Builder"],["transcribe","Audio Transcripts"],["ask","Doubt & Question Center"],["practice","Practice & Assessment"],["progress","My Progress"]]}
+    renderNavItem={(key,label)=><><span className="student-nav-icon">{key==="overview"?<GraduationCapIcon/>:key==="subjects"?<BookIcon/>:key==="builder"?<CpuIcon/>:key==="transcribe"?<FileTextIcon/>:key==="ask"?<HelpCircleIcon/>:key==="practice"?<CheckCircleIcon/>:<BarChartIcon/>}</span><span>{label}</span></>}
     footer={<><AccountPassword logout={onLogout}/><button type="button" onClick={onLogout}><LogOutIcon width={16} height={16}/>Sign out</button></>}
     tools={<>
             {currentSection === "overview" && (
@@ -112,12 +108,6 @@ export function StudentLayout({
               </label>
             )}
             <div className="notification-dropdown-wrapper">
-=======
-  return <PortalShell portal="Student" name={user.full_name} active={currentSection} navigate={onNavigate}
-    items={[[ "overview","Overview"],["subjects","My Subjects"],["transcribe","Audio Transcripts"],["ask","Ask ILA"],["practice","Adaptive Quizzes"],["progress","My Progress"]]}
-    footer={<><AccountPassword logout={onLogout}/><button onClick={onLogout}>Sign out</button></>}
-    tools={<>            <div className="notification-dropdown-wrapper">
->>>>>>> origin/main
               <button
                 type="button"
                 className={`header-icon-btn ${unreadCount > 0 ? "has-unread" : ""}`}

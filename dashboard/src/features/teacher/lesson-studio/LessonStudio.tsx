@@ -1,10 +1,6 @@
-<<<<<<< HEAD
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-=======
-import { useEffect, useState } from "react";
->>>>>>> origin/main
 import {
   createNotes,
   createTeacherLesson,
