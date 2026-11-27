@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { getTeacherOverview, getTeacherLessons, getTeacherClasses } from "../../../api";
 import { subscribeRealtime } from "../../../realtime";
 import { messageOf } from "../../../format";
@@ -26,8 +26,13 @@ import {
 } from "../../../components/icons";
 import { EmptyState, LoadingState } from "../../../shared/components/AcademicUI";
 
+const MiniCalendar = lazy(() =>
+  import("../../MiniCalendar").then(({ MiniCalendar: Widget }) => ({ default: Widget })),
+);
+
 interface TeacherOverviewProps {
   user: AuthUser;
+  onNavigateCalendar: () => void;
   onNavigateStudio: () => void;
   onNavigateClasses: () => void;
   onNavigateLibrary: () => void;
@@ -37,6 +42,7 @@ interface TeacherOverviewProps {
 
 export function TeacherOverview({
   user,
+  onNavigateCalendar,
   onNavigateStudio,
   onNavigateClasses,
   onNavigateLibrary,
@@ -122,11 +128,16 @@ export function TeacherOverview({
         <div>
           <h1>Good day, {user.full_name || user.student_identifier || "Teacher"}!</h1>
           <p>Manage your classes, create lessons and track student learning — all in one place.</p>
+          <button type="button" className="btn btn-primary" onClick={onNavigateStudio}>
+            <PlayIcon width={16} height={16} />
+            Open Lesson Studio
+          </button>
         </div>
-        <button type="button" className="btn btn-primary" onClick={onNavigateStudio}>
-          <PlayIcon width={16} height={16} />
-          Open Lesson Studio
-        </button>
+        <div className="teacher-overview-heading-actions">
+          <Suspense fallback={<div className="mini-calendar-loading" role="status">Loading calendar…</div>}>
+            <MiniCalendar onOpenCalendar={onNavigateCalendar} />
+          </Suspense>
+        </div>
       </section>
 
       <section className="teacher-stat-grid" aria-label="Teaching summary">

@@ -143,6 +143,55 @@ def test_config_reports_retrieval_quiz_and_storage() -> None:
     assert body["storage"]["engine"] == "sqlite"
 
 
+def test_calendar_events_support_student_and_teacher_accounts_privately(
+    store: Storage, school_session
+) -> None:
+    school_session(client, store, "student", "calendar-student")
+    payload = {
+        "title": "Revision",
+        "description": "Review chapter 4",
+        "start_at": "2027-01-02T09:00:00+05:30",
+        "end_at": "2027-01-02T10:00:00+05:30",
+        "reminder_minutes": 15,
+    }
+    created = client.post("/api/calendar/events", json=payload)
+    assert created.status_code == 200
+    event = created.json()
+    assert event["start_at"] == "2027-01-02T03:30:00+00:00"
+
+    school_session(client, store, "teacher", "calendar-teacher")
+    assert client.get("/api/calendar/events").json() == []
+    assert client.put(f"/api/calendar/events/{event['id']}", json=payload).status_code == 404
+    assert client.delete(f"/api/calendar/events/{event['id']}").status_code == 404
+
+    teacher_event = client.post("/api/calendar/events", json=payload)
+    assert teacher_event.status_code == 200
+    assert client.get(
+        "/api/calendar/events",
+        params={
+            "start_at": "2027-01-02T00:00:00Z",
+            "end_at": "2027-01-03T00:00:00Z",
+        },
+    ).json() == [teacher_event.json()]
+
+
+def test_calendar_rejects_invalid_times_and_admin_access(store: Storage, school_session) -> None:
+    school_session(client, store, "student", "calendar-invalid")
+    invalid = client.post(
+        "/api/calendar/events",
+        json={
+            "title": "Invalid",
+            "start_at": "2027-01-02T10:00:00+00:00",
+            "end_at": "2027-01-02T09:00:00+00:00",
+            "reminder_minutes": 0,
+        },
+    )
+    assert invalid.status_code == 422
+
+    school_session(client, store, "admin", "calendar-admin")
+    assert client.get("/api/calendar/events").status_code == 403
+
+
 def test_ask_falls_back_to_the_selected_demo(store: Storage, school_session) -> None:
     school_session(client,store,"student","api-student")
     response = client.post(

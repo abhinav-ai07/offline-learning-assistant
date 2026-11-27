@@ -18,6 +18,7 @@ import { Breadcrumbs, type BreadcrumbItem } from "../components/Breadcrumbs";
 
 export type TeacherNavSection =
   | "overview"
+  | "calendar"
   | "classes"
   | "studio"
   | "doubts"
@@ -52,7 +53,7 @@ export function TeacherLayout({
   const unread = notifications.filter(n => !n.is_read).length;
   const activeSection = currentSection === "doubts" || currentSection === "studio" || currentSection === "library" || currentSection === "classes"
     ? currentSection
-    : currentSection === "settings" ? "overview" : currentSection === "overview" ? "overview" : "classes";
+    : currentSection === "settings" || currentSection === "calendar" ? "overview" : currentSection === "overview" ? "overview" : "classes";
   return <PortalShell portal="Teacher" name={user.full_name} active={activeSection} navigate={onNavigate}
     items={[[ "overview","Overview"],["classes","My Classes"],["studio","Lesson Studio"],["library","Published Lessons"],["doubts","Doubts & FAQs"]]}
     renderNavItem={(key,label)=><><span className="teacher-nav-icon">{key==="overview"?<BarChartIcon/>:key==="classes"?<UsersIcon/>:key==="studio"?<PlayIcon/>:<LayersIcon/>}</span><span>{label}</span>{key === "doubts" && unread > 0 && <span className="doubt-unread" aria-label={unread + " unread doubts"}>{unread}</span>}</>}

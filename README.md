@@ -9,6 +9,8 @@ Open [Administration](http://127.0.0.1:8765/admin/login), [Teacher](http://127.0
 The administration directory starts with Class 10, Section A. Add other supported classes later from Classes & Sections; each new class starts with Section A.
 Administrators can permanently delete student or teacher accounts; deleting a student also removes their learning records, while deleting a teacher removes their lessons and assignments.
 
+Student and teacher portals include private calendars for creating, editing and deleting events. Choose an in-app reminder from the event form; reminders appear while that user's portal is open.
+
 Teachers can save a lesson draft in Lesson Studio and reopen it in the Lesson Library. Publishing stores the reviewed transcript and notes, creates class notifications and makes the dated lecture available in My Subjects. A quiz launched from that lecture uses its transcript and notes. The administration directory and teacher reports use the same SQLite database.
 
 

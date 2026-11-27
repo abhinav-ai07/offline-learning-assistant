@@ -21,7 +21,7 @@ import {
 import { Breadcrumbs, type BreadcrumbItem } from "../components/Breadcrumbs";
 import { markNotificationRead } from "../../api";
 
-export type StudentNavSection = "overview" | "subjects" | "builder" | "transcribe" | "ask" | "practice" | "progress";
+export type StudentNavSection = "overview" | "subjects" | "calendar" | "builder" | "transcribe" | "ask" | "practice" | "progress";
 
 interface StudentLayoutProps {
   user: AuthUser;
@@ -80,7 +80,7 @@ export function StudentLayout({
     }
   };
 
-  return <PortalShell portal="Student" name={user.full_name} portalIcon={<GraduationCapIcon width={22} height={22}/>} active={currentSection} navigate={onNavigate}
+  return <PortalShell portal="Student" name={user.full_name} portalIcon={<GraduationCapIcon width={22} height={22}/>} active={currentSection === "calendar" ? "overview" : currentSection} navigate={onNavigate}
     items={[[ "overview","Overview"],["subjects","My Subjects"],["builder","Smart Study Builder"],["ask","Doubt & Question Center"],["practice","Practice & Assessment"],["progress","My Progress"]]}
     renderNavItem={(key,label)=><><span className="student-nav-icon">{key==="overview"?<GraduationCapIcon/>:key==="subjects"?<BookIcon/>:key==="builder"?<CpuIcon/>:key==="ask"?<HelpCircleIcon/>:key==="practice"?<CheckCircleIcon/>:<BarChartIcon/>}</span><span>{label}</span></>}
     footer={<><AccountPassword logout={onLogout}/><button type="button" onClick={onLogout}><LogOutIcon width={16} height={16}/>Sign out</button></>}

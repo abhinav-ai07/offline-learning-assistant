@@ -2,7 +2,7 @@ import { useDoubtNotifications } from "../features/useDoubtNotifications";
 import { StudentDoubts, TeacherDoubts } from "../features/Doubts";
 
 import { Administration, PortalLogin } from "../School";
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { getMe, getStudentNotifications, logout } from "../api";
 import { useRealtimeConnection } from "../realtime";
 import type { AppNotification, AuthUser, LessonDetail } from "../types";
@@ -24,9 +24,15 @@ import { LessonStudio } from "../features/teacher/lesson-studio/LessonStudio";
 import { LessonLibrary } from "../features/teacher/lesson-library/LessonLibrary";
 import { StudentActivity } from "../features/teacher/student-activity/StudentActivity";
 import { PerformanceInsights } from "../features/teacher/performance/PerformanceInsights";
+import { CalendarReminderToasts, useCalendarReminders } from "../features/useCalendarReminders";
+
+const CalendarPage = lazy(() =>
+  import("../features/CalendarPage").then(({ CalendarPage: Page }) => ({ default: Page })),
+);
 
 export function AppRouter() {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const { reminders, dismissReminder } = useCalendarReminders(user?.id);
   const [authChecking, setAuthChecking] = useState(true);
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     return (localStorage.getItem("ila_theme") as "dark" | "light") || "light";
@@ -117,7 +123,9 @@ export function AppRouter() {
     if (!user) return;
 
     if (user.role === "student") {
-      if (currentPath.includes("/student/subjects")) {
+      if (currentPath.includes("/student/calendar")) {
+        setStudentSection("calendar");
+      } else if (currentPath.includes("/student/subjects")) {
         setStudentSection("subjects");
       } else if (currentPath.includes("/student/builder")) {
         setStudentSection("builder");
@@ -133,7 +141,9 @@ export function AppRouter() {
         setStudentSection("overview");
       }
     } else {
-      if (currentPath.includes("/teacher/classes")) setTeacherSection("classes");
+      if (currentPath.includes("/teacher/calendar")) {
+        setTeacherSection("calendar");
+      } else if (currentPath.includes("/teacher/classes")) setTeacherSection("classes");
       else if (currentPath.includes("/teacher/studio")) setTeacherSection("studio");
       else if (currentPath.includes("/teacher/doubts")) setTeacherSection("doubts");
       else if (currentPath.includes("/teacher/library")) setTeacherSection("library");
@@ -249,6 +259,8 @@ export function AppRouter() {
       breadcrumbItems.push({ label: "Practice & Assessment", active: true });
     } else if (studentSection === "progress") {
       breadcrumbItems.push({ label: "My Progress", active: true });
+    } else if (studentSection === "calendar") {
+      breadcrumbItems.push({ label: "Calendar", active: true });
     }
 
     return (
@@ -275,9 +287,14 @@ export function AppRouter() {
           theme={theme}
           onToggleTheme={toggleTheme}
         >
+          <CalendarReminderToasts reminders={reminders} onDismiss={dismissReminder} />
           {studentSection === "overview" && (
             <StudentOverview
               user={user}
+              onNavigateCalendar={() => {
+                setStudentSection("calendar");
+                navigateTo("/student/calendar");
+              }}
               onOpenLesson={(lessonId) => {
                 setActiveLessonId(lessonId);
                 setStudentSection("subjects");
@@ -367,6 +384,11 @@ export function AppRouter() {
               }}
             />
           )}
+          {studentSection === "calendar" && (
+            <Suspense fallback={<div role="status" className="loading-skeleton">Loading calendar…</div>}>
+              <CalendarPage />
+            </Suspense>
+          )}
         </StudentLayout>
       </ErrorBoundary>
     );
@@ -393,6 +415,8 @@ export function AppRouter() {
     teacherBreadcrumbItems.push({ label: "Performance & Insights", active: true });
   } else if (teacherSection === "settings") {
     teacherBreadcrumbItems.push({ label: "Settings", active: true });
+  } else if (teacherSection === "calendar") {
+    teacherBreadcrumbItems.push({ label: "Calendar", active: true });
   }
 
   return (
@@ -413,9 +437,14 @@ export function AppRouter() {
         theme={theme}
         onToggleTheme={toggleTheme}
       >
+        <CalendarReminderToasts reminders={reminders} onDismiss={dismissReminder} />
         {teacherSection === "overview" && (
           <TeacherOverview
             user={user}
+            onNavigateCalendar={() => {
+              setTeacherSection("calendar");
+              navigateTo("/teacher/calendar");
+            }}
             onNavigateStudio={() => {
               setTeacherSection("studio");
               navigateTo("/teacher/studio");
@@ -492,6 +521,11 @@ export function AppRouter() {
 
         {teacherSection === "insights" && (
           <PerformanceInsights user={user} />
+        )}
+        {teacherSection === "calendar" && (
+          <Suspense fallback={<div role="status" className="loading-skeleton">Loading calendar…</div>}>
+            <CalendarPage />
+          </Suspense>
         )}
       </TeacherLayout>
     </ErrorBoundary>

@@ -6,6 +6,7 @@ import type {
   AskResponse,
   AuthResponse,
   AuthUser,
+  CalendarEvent,
   ChapterInfo,
   DemoLecture,
   DemoLine,
@@ -614,6 +615,47 @@ export function getClassChapters(classLevel: number, subject: string): Promise<C
 
 export function getClassTimetable(classLevel: number, section: string = "A"): Promise<TimetableSlot[]> {
   return request<TimetableSlot[]>(`/api/classes/${classLevel}/timetable?section=${encodeURIComponent(section)}`);
+}
+
+export interface CalendarEventPayload {
+  title: string;
+  description: string;
+  start_at: string;
+  end_at: string;
+  reminder_minutes: number | null;
+}
+
+export function getCalendarEvents(startAt?: string, endAt?: string): Promise<CalendarEvent[]> {
+  const params = new URLSearchParams();
+  if (startAt) params.set("start_at", startAt);
+  if (endAt) params.set("end_at", endAt);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return request<CalendarEvent[]>(`/api/calendar/events${query}`);
+}
+
+export function createCalendarEvent(payload: CalendarEventPayload): Promise<CalendarEvent> {
+  return request<CalendarEvent>("/api/calendar/events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateCalendarEvent(
+  eventId: string,
+  payload: CalendarEventPayload,
+): Promise<CalendarEvent> {
+  return request<CalendarEvent>(`/api/calendar/events/${encodeURIComponent(eventId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteCalendarEvent(eventId: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/calendar/events/${encodeURIComponent(eventId)}`, {
+    method: "DELETE",
+  });
 }
 
 // ------------------------------------------------------------- Student Portal APIs

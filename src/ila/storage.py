@@ -263,6 +263,18 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS calendar_events (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    start_at TEXT NOT NULL,
+    end_at TEXT NOT NULL,
+    reminder_minutes INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS assignments (
     id TEXT PRIMARY KEY,
     lesson_id TEXT REFERENCES lessons(id) ON DELETE SET NULL,
@@ -309,6 +321,7 @@ CREATE INDEX IF NOT EXISTS idx_lessons_class_sec ON lessons(class_level, section
 CREATE INDEX IF NOT EXISTS idx_lessons_teacher ON lessons(teacher_id);
 CREATE INDEX IF NOT EXISTS idx_lesson_activity_student ON lesson_activity(student_id, lesson_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_user_start ON calendar_events(user_id, start_at);
 CREATE INDEX IF NOT EXISTS idx_teacher_assignments ON teacher_class_assignments(teacher_id, class_level, section);
 CREATE INDEX IF NOT EXISTS idx_student_enrollments ON student_enrollments(student_id, class_level, section);
 """
@@ -2896,6 +2909,93 @@ class Storage:
                     VALUES (?,?,'Teacher replied','Your doubt has a new reply.','system','/student/ask',CURRENT_TIMESTAMP)""",
                     (uuid4().hex,doubt["student_id"]))
             return dict(doubt)
+
+    # ---------------------------------------------------------------- calendar
+    @staticmethod
+    def _calendar_event(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "title": row["title"],
+            "description": row["description"],
+            "start_at": row["start_at"],
+            "end_at": row["end_at"],
+            "reminder_minutes": row["reminder_minutes"],
+        }
+
+    def list_calendar_events(
+        self, user_id: str, start_at: str | None = None, end_at: str | None = None
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM calendar_events WHERE user_id = ?"
+        params: list[Any] = [user_id]
+        if start_at is not None:
+            query += " AND start_at >= ?"
+            params.append(start_at)
+        if end_at is not None:
+            query += " AND start_at < ?"
+            params.append(end_at)
+        query += " ORDER BY start_at"
+        with self._connection() as conn:
+            return [self._calendar_event(row) for row in conn.execute(query, params)]
+
+    def create_calendar_event(
+        self,
+        user_id: str,
+        title: str,
+        description: str,
+        start_at: str,
+        end_at: str,
+        reminder_minutes: int | None,
+    ) -> dict[str, Any]:
+        event_id = uuid4().hex
+        now = _now()
+        with self._connection() as conn:
+            conn.execute(
+                """INSERT INTO calendar_events
+                   (id,user_id,title,description,start_at,end_at,reminder_minutes,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (event_id, user_id, title, description, start_at, end_at, reminder_minutes, now, now),
+            )
+            row = conn.execute(
+                "SELECT * FROM calendar_events WHERE id = ? AND user_id = ?",
+                (event_id, user_id),
+            ).fetchone()
+            return self._calendar_event(row)
+
+    def update_calendar_event(
+        self,
+        user_id: str,
+        event_id: str,
+        title: str,
+        description: str,
+        start_at: str,
+        end_at: str,
+        reminder_minutes: int | None,
+    ) -> dict[str, Any] | None:
+        with self._connection() as conn:
+            cursor = conn.execute(
+                """UPDATE calendar_events
+                   SET title=?,description=?,start_at=?,end_at=?,reminder_minutes=?,updated_at=?
+                   WHERE id=? AND user_id=?""",
+                (
+                    title, description, start_at, end_at, reminder_minutes, _now(),
+                    event_id, user_id,
+                ),
+            )
+            if not cursor.rowcount:
+                return None
+            row = conn.execute(
+                "SELECT * FROM calendar_events WHERE id = ? AND user_id = ?",
+                (event_id, user_id),
+            ).fetchone()
+            return self._calendar_event(row)
+
+    def delete_calendar_event(self, user_id: str, event_id: str) -> bool:
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM calendar_events WHERE id = ? AND user_id = ?",
+                (event_id, user_id),
+            )
+            return cursor.rowcount > 0
 
     # ---------------------------------------------------------------- notifications
     def get_user_notifications(self, user_id: str, unread_only: bool = False) -> list[dict[str, Any]]:

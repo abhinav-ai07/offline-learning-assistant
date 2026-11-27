@@ -700,6 +700,15 @@ export interface AppNotification {
   created_at: string;
 }
 
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  description: string;
+  start_at: string;
+  end_at: string;
+  reminder_minutes: number | null;
+}
+
 export interface ActivityLogItem {
   id: number;
   student_id: string;

@@ -204,6 +204,7 @@ html,body,#root {height:auto;min-height:100%;overflow:visible}
 .teacher-dashboard-heading p,.classes-header-bar p,.library-header-bar p,.studio-header-strip p {margin:0;color:var(--text-secondary)}
 .teacher-dashboard-heading .teacher-eyebrow {margin:0 0 5px;color:var(--accent-text);font-size:.76rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
 .teacher-dashboard-heading>.btn {flex:0 0 auto}
+.teacher-overview-heading-actions {display:flex;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end;gap:8px}
 .teacher-stat-grid {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:20px}
 .teacher-stat-card {display:grid;grid-template-columns:44px 1fr;grid-template-rows:auto auto;align-items:center;column-gap:13px;min-height:90px;padding:16px;border:1px solid var(--border-default);border-radius:12px;background:var(--bg-surface);color:var(--text-primary);text-align:left;cursor:pointer;transition:border-color .15s,transform .15s,box-shadow .15s}
 .teacher-stat-card:hover {transform:translateY(-1px);border-color:var(--accent-border);box-shadow:var(--shadow-sm)}
@@ -338,6 +339,7 @@ html,body,#root {height:auto;min-height:100%;overflow:visible}
   [data-portal="teacher"] .academic-mast {min-height:52px;padding:8px 14px}
   [data-portal="teacher"] .teacher-profile-name {display:none}
   .teacher-dashboard-heading,.studio-header-strip {align-items:flex-start;flex-direction:column}
+  .teacher-overview-heading-actions {justify-content:flex-start}
   .teacher-stat-grid,.library-stats-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
   .teacher-stat-card {min-height:78px;padding:11px}
   .teacher-stat-icon {width:36px;height:36px}
@@ -1183,3 +1185,47 @@ html,body,#root {height:auto;min-height:100%;overflow:visible}
 .notice-row .notification-item-content { display: grid; gap: .15rem; overflow-wrap: anywhere; }
 .notification-list .notice-dismiss { width: auto; padding: .55rem; color: var(--text-secondary); }
 .notice-footer { border-top: 1px solid var(--border-subtle); padding: .65rem 1rem; }
+
+.mini-calendar {position:relative;z-index:1;width:min(100%,292px);padding:11px 12px;border:1px solid var(--border-default);border-radius:11px;background:var(--bg-surface);box-shadow:0 6px 18px rgba(22,52,42,.08);color:var(--text-primary)}
+.mini-calendar-loading {display:grid;place-items:center;min-height:190px;width:min(100%,292px);color:var(--text-secondary);font-size:.8rem}
+.mini-calendar-heading {display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px}
+.mini-calendar-heading h3 {display:flex;align-items:center;gap:6px;margin:0;font-size:.86rem;font-weight:750}
+.mini-calendar-heading h3 svg {color:var(--accent-text)}
+.mini-calendar-heading>div:first-child>span {display:block;margin-top:1px;color:var(--text-secondary);font-size:.72rem}
+.mini-calendar-month-nav {display:flex;gap:3px}
+.mini-calendar-month-nav button {display:grid;place-items:center;width:27px;height:27px;padding:0;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-surface);color:var(--text-secondary);cursor:pointer}
+.mini-calendar-month-nav button:hover {border-color:var(--accent);color:var(--accent-text)}
+.mini-calendar-grid {display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;text-align:center}
+.mini-calendar-weekday {display:grid;place-items:center;height:19px;color:var(--text-muted);font-size:.64rem;font-weight:700}
+.mini-calendar-blank {height:27px}
+.mini-calendar-day {position:relative;display:grid;place-items:center;width:100%;height:27px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--text-primary);font:500 .7rem/1 system-ui,sans-serif;cursor:pointer}
+.mini-calendar-day:hover {background:var(--accent-subtle);color:var(--accent-text)}
+.mini-calendar-day.is-today {outline:1px solid var(--accent);outline-offset:-1px}
+.mini-calendar-day.is-selected {background:var(--accent);color:#fff;font-weight:750}
+.mini-calendar-event-dot {position:absolute;bottom:2px;width:3px;height:3px;border-radius:50%;background:var(--accent)}
+.mini-calendar-day.is-selected .mini-calendar-event-dot {background:#fff}
+.mini-calendar-footer {display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:7px;padding-top:7px;border-top:1px solid var(--border-default)}
+.mini-calendar-footer span {overflow:hidden;color:var(--text-secondary);font-size:.65rem;text-overflow:ellipsis;white-space:nowrap}
+.mini-calendar-footer button {flex:0 0 auto;padding:4px 7px;border:0;border-radius:5px;background:var(--accent-subtle);color:var(--accent-text);font:650 .67rem system-ui,sans-serif;cursor:pointer}
+.mini-calendar-footer button:hover {filter:brightness(.96)}
+.mini-calendar-error {display:block;margin-top:5px;color:var(--danger-text);font-size:.66rem}
+[data-portal="student"] .student-welcome-banner {display:grid;grid-template-columns:minmax(0,560px) 292px;justify-content:start;align-items:center;gap:32px}
+[data-portal="student"] .student-welcome-banner:after {display:none}
+[data-portal="student"] .student-overview-illustration {display:none}
+[data-portal="student"] .welcome-content {position:relative;z-index:1;min-width:0}
+.teacher-dashboard-heading {display:grid;grid-template-columns:minmax(0,560px) 292px;justify-content:start;align-items:center;gap:32px}
+.teacher-dashboard-heading>div:first-child .btn {margin-top:16px}
+.teacher-overview-heading-actions {justify-content:flex-start;align-items:center}
+@media(max-width:900px) {
+  [data-portal="student"] .student-welcome-banner {grid-template-columns:minmax(0,1fr) minmax(240px,270px);gap:10px;padding-inline:16px}
+  .teacher-dashboard-heading {grid-template-columns:minmax(0,1fr) minmax(240px,270px);gap:16px}
+}
+@media(max-width:760px) {
+  [data-portal="student"] .student-welcome-banner {grid-template-columns:minmax(0,1fr)}
+  [data-portal="student"] .student-welcome-banner .mini-calendar {justify-self:start}
+  .teacher-dashboard-heading {display:flex;flex-direction:column;align-items:flex-start}
+  .teacher-overview-heading-actions {align-items:flex-start}
+}
+@media(max-width:440px) {
+  .mini-calendar {width:100%;max-width:292px}
+}

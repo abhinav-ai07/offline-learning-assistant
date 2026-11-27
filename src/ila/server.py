@@ -44,7 +44,7 @@ import json
 import logging
 import re
 import threading
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 import shutil
 from typing import Annotated, Any, Literal
@@ -976,6 +976,86 @@ class SchoolAccount(BaseModel):
 class PasswordChange(BaseModel):
     current_password: str
     new_password: str = Field(min_length=8,max_length=72)
+
+
+class CalendarEventInput(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=2000)
+    start_at: datetime
+    end_at: datetime
+    reminder_minutes: int | None = Field(default=15, ge=0, le=1440)
+
+
+def _calendar_timestamp(value: datetime) -> str:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise HTTPException(422, "Event times must include a timezone")
+    return value.astimezone(UTC).isoformat(timespec="seconds")
+
+
+def _calendar_payload(item: CalendarEventInput) -> dict[str, Any]:
+    title = item.title.strip()
+    if not title:
+        raise HTTPException(422, "Event title is required")
+    if item.end_at <= item.start_at:
+        raise HTTPException(422, "Event end must be after its start")
+    return {
+        "title": title,
+        "description": item.description.strip(),
+        "start_at": _calendar_timestamp(item.start_at),
+        "end_at": _calendar_timestamp(item.end_at),
+        "reminder_minutes": item.reminder_minutes,
+    }
+
+
+def require_calendar_user(user: Annotated[dict, Depends(get_current_user)]) -> dict:
+    if user.get("role") not in ("student", "teacher"):
+        raise HTTPException(403, "Student or teacher access required")
+    return user
+
+
+@app.get("/api/calendar/events")
+def list_calendar_events(
+    user: Annotated[dict, Depends(require_calendar_user)],
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+) -> list[dict[str, Any]]:
+    start = _calendar_timestamp(start_at) if start_at is not None else None
+    end = _calendar_timestamp(end_at) if end_at is not None else None
+    if start and end and end <= start:
+        raise HTTPException(422, "Calendar range end must be after its start")
+    return _store().list_calendar_events(user["id"], start, end)
+
+
+@app.post("/api/calendar/events")
+def create_calendar_event(
+    item: CalendarEventInput,
+    user: Annotated[dict, Depends(require_calendar_user)],
+) -> dict[str, Any]:
+    return _store().create_calendar_event(user["id"], **_calendar_payload(item))
+
+
+@app.put("/api/calendar/events/{event_id}")
+def update_calendar_event(
+    event_id: str,
+    item: CalendarEventInput,
+    user: Annotated[dict, Depends(require_calendar_user)],
+) -> dict[str, Any]:
+    event = _store().update_calendar_event(
+        user["id"], event_id, **_calendar_payload(item)
+    )
+    if event is None:
+        raise HTTPException(404, "Calendar event not found")
+    return event
+
+
+@app.delete("/api/calendar/events/{event_id}")
+def delete_calendar_event(
+    event_id: str,
+    user: Annotated[dict, Depends(require_calendar_user)],
+) -> dict[str, str]:
+    if not _store().delete_calendar_event(user["id"], event_id):
+        raise HTTPException(404, "Calendar event not found")
+    return {"status": "ok"}
 
 
 @app.post("/api/auth/password")

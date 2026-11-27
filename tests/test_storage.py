@@ -169,3 +169,53 @@ def test_database_is_reusable_after_reopening(tmp_path: Path) -> None:
     loaded = second.get_session(session_id)
     assert loaded is not None
     assert loaded["title"] == "Persisted"
+
+
+def test_calendar_events_are_private_and_can_be_updated_and_deleted(tmp_path: Path) -> None:
+    store = Storage(tmp_path / "ila.db")
+    owner = store.create_user(
+        full_name="Calendar owner",
+        role="student",
+        student_identifier="calendar-owner",
+        password_hash="test",
+    )
+    other = store.create_user(
+        full_name="Other student",
+        role="student",
+        student_identifier="calendar-other",
+        password_hash="test",
+    )
+    event = store.create_calendar_event(
+        owner["id"],
+        "Study session",
+        "Review chapter 4",
+        "2027-01-02T09:00:00+00:00",
+        "2027-01-02T10:00:00+00:00",
+        15,
+    )
+
+    assert store.list_calendar_events(owner["id"]) == [event]
+    assert store.list_calendar_events(other["id"]) == []
+    assert store.update_calendar_event(
+        other["id"],
+        event["id"],
+        "Changed",
+        "",
+        "2027-01-02T11:00:00+00:00",
+        "2027-01-02T12:00:00+00:00",
+        None,
+    ) is None
+    assert not store.delete_calendar_event(other["id"], event["id"])
+    updated = store.update_calendar_event(
+        owner["id"],
+        event["id"],
+        "Updated study session",
+        "",
+        "2027-01-02T11:00:00+00:00",
+        "2027-01-02T12:00:00+00:00",
+        None,
+    )
+    assert updated is not None
+    assert updated["title"] == "Updated study session"
+    assert store.delete_calendar_event(owner["id"], event["id"])
+    assert store.list_calendar_events(owner["id"]) == []

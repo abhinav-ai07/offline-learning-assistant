@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { getStudentOverview, getStudentSubjectsTree } from "../../../api";
 import { subscribeRealtime } from "../../../realtime";
 import { messageOf } from "../../../format";
@@ -16,8 +16,13 @@ import {
   WarningIcon,
 } from "../../../components/icons";
 
+const MiniCalendar = lazy(() =>
+  import("../../MiniCalendar").then(({ MiniCalendar: Widget }) => ({ default: Widget })),
+);
+
 interface StudentOverviewProps {
   user: AuthUser;
+  onNavigateCalendar: () => void;
   onOpenLesson: (lessonId: string) => void;
   onNavigateSubjects: () => void;
   onNavigateTranscribe?: () => void;
@@ -27,6 +32,7 @@ interface StudentOverviewProps {
 
 export function StudentOverview({
   user,
+  onNavigateCalendar,
   onOpenLesson,
   onNavigateSubjects,
   onNavigateTranscribe,
@@ -150,21 +156,9 @@ export function StudentOverview({
             </div>
           )}
         </div>
-        <svg className="student-overview-illustration" viewBox="0 0 420 150" aria-hidden="true">
-          <path d="M0 116c48-35 86-27 133-4 42 21 86 13 125-16 45-33 87-33 162 0v54H0z" fill="#d9f0e2" />
-          <path d="M45 115c42-22 81-18 126 2 42 18 89 6 129-19 38-23 76-20 120-1v40H45z" fill="#c6e7d4" />
-          <rect x="268" y="46" width="104" height="70" rx="7" fill="#08765a" />
-          <rect x="275" y="52" width="90" height="58" rx="3" fill="#eaf7ef" />
-          <path d="m295 89 20-20 18 14 12-10 15 15" fill="none" stroke="#55a782" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M256 118h128l-13 9H270z" fill="#064e47" />
-          <rect x="67" y="100" width="112" height="17" rx="4" fill="#0b8061" />
-          <rect x="58" y="86" width="121" height="16" rx="4" fill="#fff" stroke="#91c9ac" strokeWidth="3" />
-          <rect x="76" y="72" width="103" height="16" rx="4" fill="#75bd94" />
-          <path d="M114 72v16m13-16v16" stroke="#eaf7ef" strokeWidth="3" />
-          <circle cx="209" cy="103" r="13" fill="#f3c78c" />
-          <path d="M199 101c2-13 20-14 22 0" fill="#315247" />
-          <path d="M194 124c3-14 28-14 31 0" fill="#3c8b73" />
-        </svg>
+        <Suspense fallback={<div className="mini-calendar-loading" role="status">Loading calendar…</div>}>
+          <MiniCalendar onOpenCalendar={onNavigateCalendar} />
+        </Suspense>
       </section>
 
       <section className="academic-kpi-grid student-overview-stats" aria-label="Student summary">
