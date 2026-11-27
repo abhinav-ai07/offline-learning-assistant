@@ -2421,6 +2421,7 @@ class Storage:
             res["notes_json"] = _loads(res.get("notes_json"))
             res["key_concepts"] = _loads(res.get("key_concepts_json")) or []
             res["examples"] = _loads(res.get("examples_json")) or []
+            res["is_student_generated"] = res.get("status") == "student_private"
             return res
 
     def list_lessons(
@@ -2667,7 +2668,7 @@ class Storage:
         """Construct the full academic hierarchy: Class -> Section -> Subject -> Chapter -> Daily Classroom Lessons."""
         with self._connection() as conn:
             subjects = self.get_subjects(class_level)
-            # Fetch all published lessons for this class/section
+            # Fetch all published lessons for this class and this student's private self-study lessons
             lessons = conn.execute(
                 """
                 SELECT l.*, COALESCE(u.full_name, 'Classroom Teacher') AS teacher_name,
@@ -2679,10 +2680,11 @@ class Storage:
                 FROM lessons l
                 LEFT JOIN users u ON l.teacher_id = u.id
                 LEFT JOIN lesson_completions lc ON l.id = lc.lesson_id AND lc.student_id = ?
-                WHERE l.class_level = ? AND l.status = 'published'
+                WHERE l.class_level = ?
+                  AND (l.status = 'published' OR (l.status = 'student_private' AND l.teacher_id = ?))
                 ORDER BY l.teaching_date DESC, l.chapter_number ASC
                 """,
-                (student_id, class_level),
+                (student_id, class_level, student_id),
             ).fetchall()
 
             # Group lessons by subject and chapter
@@ -2697,7 +2699,9 @@ class Storage:
                     "id": r["id"],
                     "title": r["title"],
                     "teaching_date": r["teaching_date"],
-                    "teacher_name": r["teacher_name"],
+                    "teacher_name": "You (Self-Study)" if r["status"] == "student_private" else r["teacher_name"],
+                    "status": r["status"],
+                    "is_student_generated": r["status"] == "student_private",
                     "published_at": r["published_at"],
                     "duration_s": r["duration_s"],
                     "has_transcript": bool(r["transcript"] and len(r["transcript"].strip()) > 0),

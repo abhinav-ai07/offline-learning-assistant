@@ -40,10 +40,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import re
 import threading
+from datetime import date
 from pathlib import Path
+import shutil
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
@@ -59,14 +62,14 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ila import __version__, hardware
 from ila.asr import AsrProvider, create_asr
-from ila.audio import FileSource, build_source, list_input_devices
+from ila.audio import FileSource, QueueAudioSource, build_source, list_input_devices
 from ila.auth import (
     compute_expiration,
     extract_token,
@@ -79,9 +82,13 @@ from ila.curriculum import (
     CLASS_LEVELS,
     SUBJECT_LABELS,
     SUBJECTS,
+    Chapter,
+    Course,
+    SyllabusContext,
     build_syllabus_context,
     course_catalogue,
     get_course,
+    match_chapters,
 )
 from ila.demo import demo_summaries, find_demo
 from ila.events import SCHEMA_VERSION, CaptionEvent
@@ -192,6 +199,98 @@ SETTINGS = load_settings()
 NOTES_LOCK = threading.Lock()
 #: Serialise batch transcription; the WS capture thread owns the model otherwise.
 TRANSCRIBE_LOCK = threading.Lock()
+
+
+class _RealtimeHub:
+    """Thread-safe WebSocket pub/sub hub for instant portal updates."""
+
+    def __init__(self) -> None:
+        self._clients: dict[WebSocket, dict[str, Any]] = {}
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._lock = threading.Lock()
+
+    def attach_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+
+    def register(self, ws: WebSocket, user: dict[str, Any]) -> None:
+        with self._lock:
+            self._clients[ws] = {
+                "user_id": user.get("id"),
+                "role": user.get("role"),
+                "class_level": user.get("class_level"),
+            }
+
+    def unregister(self, ws: WebSocket) -> None:
+        with self._lock:
+            self._clients.pop(ws, None)
+
+    async def broadcast(
+        self,
+        event_type: str,
+        *,
+        class_level: int | None = None,
+        target_user_id: str | None = None,
+        roles: tuple[str, ...] | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        payload = {"type": event_type, "class_level": class_level, **(data or {})}
+        with self._lock:
+            snapshot = list(self._clients.items())
+
+        stale: list[WebSocket] = []
+        for ws, meta in snapshot:
+            if roles and meta.get("role") not in roles and meta.get("user_id") != target_user_id:
+                continue
+            if (
+                class_level is not None
+                and meta.get("role") == "student"
+                and meta.get("class_level") != class_level
+                and meta.get("user_id") != target_user_id
+            ):
+                continue
+            if target_user_id and roles is None and meta.get("user_id") != target_user_id:
+                continue
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                stale.append(ws)
+        for ws in stale:
+            self.unregister(ws)
+
+
+REALTIME_HUB = _RealtimeHub()
+
+
+def _emit_realtime_event(
+    event_type: str,
+    *,
+    class_level: int | None = None,
+    target_user_id: str | None = None,
+    roles: tuple[str, ...] | None = None,
+    data: dict[str, Any] | None = None,
+) -> None:
+    """Safely push a real-time event from either sync or async route handlers."""
+    loop = REALTIME_HUB._loop
+    if loop is None or loop.is_closed():
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+    coro = REALTIME_HUB.broadcast(
+        event_type,
+        class_level=class_level,
+        target_user_id=target_user_id,
+        roles=roles,
+        data=data,
+    )
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is loop:
+        loop.create_task(coro)
+    else:
+        asyncio.run_coroutine_threadsafe(coro, loop)
 
 
 # ------------------------------------------------------------------ REST models
@@ -663,6 +762,43 @@ def _generate_notes_sync(
         return generator.generate(lines, title=title, syllabus=syllabus)
 
 
+def _transcribe_audio_lines(
+    settings: Settings,
+    path: Path,
+) -> tuple[list[TranscriptLine], float, dict[str, Any]]:
+    """Run offline ASR on an uploaded audio file (batched VAD on CPU when supported)."""
+    with TRANSCRIBE_LOCK:
+        asr = REGISTRY.get(settings)
+        batched_fn = getattr(asr, "transcribe_file_batched", None)
+        if callable(batched_fn):
+            raw_segments, duration_s = batched_fn(
+                path,
+                batch_size=settings.asr.batch_size,
+            )
+            lines = [
+                TranscriptLine(text=text, start=start, end=end)
+                for text, start, end in raw_segments
+            ]
+        else:
+            source = FileSource(
+                path,
+                sample_rate=settings.audio.sample_rate,
+                block_ms=settings.audio.block_ms,
+                realtime=False,
+            )
+            try:
+                pipeline = CaptionPipeline.from_settings(settings, source, asr)
+                events = [event for event in pipeline.events() if event.final]
+                duration_s = source.duration_s
+            finally:
+                source.close()
+            lines = lines_from_events(events)
+
+    if not lines:
+        raise ValueError("No speech was detected in the uploaded file")
+    return lines, duration_s, asr.info.to_dict()
+
+
 def _transcribe_file(
     settings: Settings,
     path: Path,
@@ -673,24 +809,7 @@ def _transcribe_file(
     profile: str,
     use_llm: bool,
 ) -> dict[str, Any]:
-    with TRANSCRIBE_LOCK:
-        asr = REGISTRY.get(settings)
-        source = FileSource(
-            path,
-            sample_rate=settings.audio.sample_rate,
-            block_ms=settings.audio.block_ms,
-            realtime=False,
-        )
-        try:
-            pipeline = CaptionPipeline.from_settings(settings, source, asr)
-            events = [event for event in pipeline.events() if event.final]
-            duration_s = source.duration_s
-        finally:
-            source.close()
-
-    lines = lines_from_events(events)
-    if not lines:
-        raise ValueError("No speech was detected in the uploaded file")
+    lines, duration_s, asr_info = _transcribe_audio_lines(settings, path)
 
     syllabus = _syllabus_for(lines, class_level, subject)
     notes: dict[str, Any] | None = None
@@ -714,11 +833,132 @@ def _transcribe_file(
         "lines": [line.to_dict() for line in lines],
         "transcript": " ".join(line.text for line in lines),
         "duration_s": round(duration_s, 2),
-        "asr": asr.info.to_dict(),
+        "asr": asr_info,
         "notes": notes,
         "markdown": markdown,
         "notes_error": notes_error,
     }
+
+
+def _syllabus_for_subject_with_db_chapters(
+    transcript_text: str,
+    class_level: int,
+    subject: str,
+) -> SyllabusContext | None:
+    """Build syllabus matches for a class/subject, falling back to DB chapters if needed."""
+    try:
+        syllabus = build_syllabus_context(transcript_text, class_level, subject)
+    except ValueError:
+        syllabus = None
+
+    if syllabus and syllabus.course.chapters:
+        return syllabus
+
+    db_chapters = _store().get_chapters(class_level, subject)
+    if not db_chapters:
+        return syllabus
+
+    chapters = tuple(
+        Chapter(
+            number=int(ch["chapter_number"]),
+            title=str(ch["title"]),
+            keywords=tuple(
+                dict.fromkeys(
+                    w
+                    for w in re.findall(
+                        r"[a-z0-9]+",
+                        f"{ch['title']} {ch.get('description', '')}".lower(),
+                    )
+                    if len(w) > 2
+                )
+            ),
+        )
+        for ch in db_chapters
+    )
+    dynamic_course = Course(class_level, subject, chapters)
+    matches = tuple(match_chapters(transcript_text, dynamic_course, limit=3))
+    return SyllabusContext(course=dynamic_course, matches=matches)
+
+
+def _match_student_audio_to_syllabus(
+    lines: list[TranscriptLine],
+    class_level: int,
+    subject_input: str,
+) -> tuple[str, SyllabusContext, Any]:
+    """Verify audio transcript correlates with syllabus topics and return best (subject, context, match)."""
+    transcript_text = " ".join(line.text for line in lines)
+    raw_subject = subject_input.strip().lower()
+    if raw_subject in ("", "auto"):
+        candidate_subjects = [
+            str(s["code"]).strip().lower()
+            for s in _store().get_subjects(class_level)
+        ]
+        if not candidate_subjects:
+            candidate_subjects = ["maths", "science"]
+    else:
+        _, norm_subject = _selection(class_level, raw_subject)
+        candidate_subjects = [norm_subject]
+
+    best_subject: str | None = None
+    best_context: SyllabusContext | None = None
+    best_match: Any = None
+    sample_topics: list[str] = []
+
+    for cand_subj in dict.fromkeys(candidate_subjects):
+        ctx = _syllabus_for_subject_with_db_chapters(transcript_text, class_level, cand_subj)
+        if not ctx or not ctx.course.chapters:
+            continue
+        for ch in ctx.course.chapters[:4]:
+            if ch.title not in sample_topics:
+                sample_topics.append(ch.title)
+        if not ctx.matches:
+            continue
+        top = ctx.matches[0]
+        if best_match is None or top.score > best_match.score:
+            best_subject = cand_subj
+            best_context = ctx
+            best_match = top
+
+    if not sample_topics:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Rejected: No syllabus topics are configured for Class {class_level}"
+                + (f" ({raw_subject})" if raw_subject not in ("", "auto") else "")
+                + "."
+            ),
+        )
+
+    if best_match is None or best_context is None or best_subject is None or best_match.score < 1.5:
+        topics_hint = ", ".join(sample_topics[:5])
+        score_info = f" (score {best_match.score:.1f} < 1.5)" if best_match is not None else ""
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Rejected{score_info}: The spoken audio does not correlate with any "
+                f"Class {class_level} syllabus topics ({topics_hint}). "
+                f"Transcript was dropped and not saved."
+            ),
+        )
+
+    return best_subject, best_context, best_match
+
+
+async def _stream_upload_to_path(file: UploadFile, target: Path) -> None:
+    """Persist an uploaded file safely to disk, enforcing non-empty and max-size bounds."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    total = 0
+    with target.open("wb") as handle:
+        while chunk := await file.read(1024 * 1024):
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File is larger than {MAX_UPLOAD_BYTES // (1024**2)} MB",
+                )
+            handle.write(chunk)
+    if total == 0:
+        raise HTTPException(status_code=400, detail="The uploaded file is empty")
 
 
 # --------------------------------------------------------------------- auth routes
@@ -1349,18 +1589,7 @@ async def transcribe_upload(
         settings.llm.budget_s = budget_s
 
     try:
-        total = 0
-        with target.open("wb") as handle:
-            while chunk := await file.read(1024 * 1024):
-                total += len(chunk)
-                if total > MAX_UPLOAD_BYTES:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"File is larger than {MAX_UPLOAD_BYTES // (1024**2)} MB",
-                    )
-                handle.write(chunk)
-        if total == 0:
-            raise HTTPException(status_code=400, detail="The uploaded file is empty")
+        await _stream_upload_to_path(file, target)
 
         result = await asyncio.to_thread(
             _transcribe_file,
@@ -1388,6 +1617,448 @@ async def transcribe_upload(
                 target.unlink(missing_ok=True)
 
 
+@app.post("/api/student/transcribe")
+async def student_transcribe_upload(
+    current_user: Annotated[dict[str, Any], Depends(require_student)],
+    file: Annotated[UploadFile, File()],
+    subject: Annotated[str, Form()] = "auto",
+    profile: Annotated[str, Form()] = "auto",
+    use_llm: Annotated[bool, Form()] = True,
+    title: Annotated[str, Form()] = "",
+    lines_json: Annotated[str, Form()] = "",
+) -> dict[str, Any]:
+    """Transcribe student audio only if it correlates with syllabus topics, then auto-sort into its chapter."""
+    enrollment = _store().get_student_enrollment(current_user["id"])
+    class_level = int(enrollment.get("class_level") or current_user.get("class_level") or 10)
+    section = str(enrollment.get("section") or current_user.get("section") or "A")
+
+    suffix = Path(file.filename or "study_audio.wav").suffix.lower() or ".wav"
+    tmp_target = _store().path.parent / "recordings" / "_tmp" / f"{uuid4().hex}{suffix}"
+    final_target: Path | None = None
+    saved = False
+
+    settings = SETTINGS.model_copy(deep=True)
+    settings.partials.enabled = False
+    settings.llm.enabled = use_llm and profile != "extractive"
+
+    try:
+        await _stream_upload_to_path(file, tmp_target)
+        lines: list[TranscriptLine] = []
+        if lines_json.strip():
+            try:
+                raw_lines = json.loads(lines_json)
+                if isinstance(raw_lines, list):
+                    for item in raw_lines:
+                        txt = str(item.get("text", "")).strip()
+                        if txt:
+                            lines.append(
+                                TranscriptLine(
+                                    text=txt,
+                                    start=item.get("start"),
+                                    end=item.get("end"),
+                                )
+                            )
+            except Exception:
+                lines = []
+
+        if lines:
+            last_end = lines[-1].end or 0.0
+            first_start = lines[0].start or 0.0
+            duration_s = max(0.0, float(last_end) - float(first_start))
+            asr_info = {"model": settings.asr.model}
+        else:
+            lines, duration_s, asr_info = await asyncio.to_thread(
+                _transcribe_audio_lines, settings, tmp_target
+            )
+
+        matched_subject, syllabus_ctx, top_match = _match_student_audio_to_syllabus(
+            lines, class_level, subject
+        )
+        chapter_number = int(top_match.chapter.number)
+        chapter_title = str(top_match.chapter.title)
+        matched_terms = list(top_match.matched_terms)
+        correlation_score = round(float(top_match.score), 2)
+        lesson_title = title.strip() or f"{chapter_title} — Self-Study Notes"
+
+        notes_error: str | None = None
+        notes_dict: dict[str, Any] = {}
+        markdown = ""
+        try:
+            note_result = await asyncio.to_thread(
+                _generate_notes_sync,
+                settings,
+                lines,
+                title=lesson_title,
+                profile=profile if settings.llm.enabled else None,
+                syllabus=syllabus_ctx,
+            )
+            notes_dict = note_result.to_dict()
+            markdown = note_result.to_markdown()
+        except Exception as exc:
+            logger.exception("student note generation failed after transcription")
+            notes_error = str(exc)
+
+        final_dir = _store().path.parent / "recordings" / f"class_{class_level}" / matched_subject / current_user["id"]
+        final_dir.mkdir(parents=True, exist_ok=True)
+        final_target = final_dir / tmp_target.name
+        shutil.move(str(tmp_target), str(final_target))
+
+        transcript_text = " ".join(line.text for line in lines)
+        rel_audio_path = final_target.relative_to(_store().path.parent).as_posix()
+        lesson_id = _store().create_lesson(
+            title=lesson_title,
+            class_level=class_level,
+            section=section,
+            subject=matched_subject,
+            chapter_number=chapter_number,
+            chapter_title=chapter_title,
+            teacher_id=current_user["id"],
+            teaching_date=date.today().isoformat(),
+            transcript=transcript_text,
+            notes_markdown=markdown,
+            notes_json=notes_dict,
+            duration_s=round(duration_s, 2),
+            audio_filename=file.filename,
+            audio_path=rel_audio_path,
+            status="student_private",
+        )
+        saved = True
+
+        _emit_realtime_event(
+            "student_lesson_created",
+            class_level=class_level,
+            target_user_id=current_user["id"],
+            data={"lesson_id": lesson_id, "subject": matched_subject, "chapter_number": chapter_number},
+        )
+        return {
+            "lesson_id": lesson_id,
+            "title": lesson_title,
+            "subject": matched_subject,
+            "subject_label": SUBJECT_LABELS.get(matched_subject, matched_subject.title()),
+            "chapter_number": chapter_number,
+            "chapter_title": chapter_title,
+            "correlation_score": correlation_score,
+            "matched_terms": matched_terms,
+            "lines": [line.to_dict() for line in lines],
+            "transcript": transcript_text,
+            "duration_s": round(duration_s, 2),
+            "asr": asr_info,
+            "notes": notes_dict,
+            "markdown": markdown,
+            "notes_error": notes_error,
+            "audio_path": rel_audio_path,
+        }
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("student upload transcription failed")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}") from exc
+    finally:
+        with contextlib.suppress(OSError):
+            if not saved:
+                tmp_target.unlink(missing_ok=True)
+                if final_target is not None:
+                    final_target.unlink(missing_ok=True)
+
+
+def _iter_file_caption_queue(
+    settings: Settings,
+    path: Path,
+    queue: asyncio.Queue[Any],
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """Run CaptionPipeline on a file and push live partial/final events into ``queue``."""
+    try:
+        with TRANSCRIBE_LOCK:
+            asr = REGISTRY.get(settings)
+            source = FileSource(
+                path,
+                sample_rate=settings.audio.sample_rate,
+                block_ms=settings.audio.block_ms,
+                realtime=False,
+            )
+            try:
+                pipeline = CaptionPipeline.from_settings(settings, source, asr)
+                events: list[CaptionEvent] = []
+                for event in pipeline.events():
+                    loop.call_soon_threadsafe(queue.put_nowait, ("event", event))
+                    if event.final:
+                        events.append(event)
+                duration_s = source.duration_s
+            finally:
+                source.close()
+        lines = lines_from_events(events)
+        if not lines:
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                ("error", 400, "No speech was detected in the uploaded file"),
+            )
+        else:
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                ("asr_done", lines, duration_s, asr.info.to_dict()),
+            )
+    except Exception as exc:
+        logger.exception("streaming file transcription failed")
+        loop.call_soon_threadsafe(queue.put_nowait, ("error", 500, str(exc)))
+
+
+def _ndjson(payload: dict[str, Any]) -> bytes:
+    return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+@app.post("/api/transcribe/stream")
+async def transcribe_upload_stream(
+    current_user: Annotated[dict[str, Any], Depends(require_teacher)],
+    file: Annotated[UploadFile, File()],
+    class_level: Annotated[int, Form()] = 10,
+    subject: Annotated[str, Form()] = "science",
+) -> StreamingResponse:
+    """Stream real-time partial and final transcript lines while transcribing a teacher audio upload."""
+    level, name = _selection(class_level, subject)
+    if not any(
+        a["class_level"] == level and a["subject"] == name
+        for a in _store().get_teacher_assigned_classes(current_user["id"])
+    ):
+        raise HTTPException(403, "Select an assigned class and subject")
+
+    upload_dir = _store().path.parent / "recordings" / f"class_{level}" / name / current_user["id"]
+    suffix = Path(file.filename or "lecture.wav").suffix.lower() or ".wav"
+    target = upload_dir / f"{uuid4().hex}{suffix}"
+    await _stream_upload_to_path(file, target)
+
+    settings = SETTINGS.model_copy(deep=True)
+    settings.partials.enabled = True
+    settings.partials.after_s = min(settings.partials.after_s, 0.8)
+    settings.partials.interval_s = min(settings.partials.interval_s, 1.0)
+    settings.llm.enabled = False
+
+    async def event_generator():
+        saved = False
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        try:
+            yield _ndjson({"type": "status", "stage": "transcribing"})
+            task = asyncio.create_task(
+                asyncio.to_thread(_iter_file_caption_queue, settings, target, queue, loop)
+            )
+            lines: list[TranscriptLine] = []
+            duration_s = 0.0
+            asr_info: dict[str, Any] = {}
+            while True:
+                kind, *rest = await queue.get()
+                if kind == "event":
+                    ev: CaptionEvent = rest[0]
+                    yield _ndjson(ev.to_dict())
+                elif kind == "error":
+                    status_code, detail = rest
+                    yield _ndjson({"type": "error", "status_code": status_code, "detail": detail})
+                    await task
+                    return
+                elif kind == "asr_done":
+                    lines, duration_s, asr_info = rest
+                    break
+            await task
+            saved = True
+            yield _ndjson({
+                "type": "done",
+                "lines": [line.to_dict() for line in lines],
+                "transcript": " ".join(line.text for line in lines),
+                "duration_s": round(duration_s, 2),
+                "asr": asr_info,
+                "audio_path": target.relative_to(_store().path.parent).as_posix(),
+            })
+        finally:
+            with contextlib.suppress(OSError):
+                if not saved:
+                    target.unlink(missing_ok=True)
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+
+
+@app.post("/api/student/transcribe/stream")
+async def student_transcribe_upload_stream(
+    current_user: Annotated[dict[str, Any], Depends(require_student)],
+    file: Annotated[UploadFile, File()],
+    subject: Annotated[str, Form()] = "auto",
+    profile: Annotated[str, Form()] = "auto",
+    use_llm: Annotated[bool, Form()] = True,
+    title: Annotated[str, Form()] = "",
+    lines_json: Annotated[str, Form()] = "",
+) -> StreamingResponse:
+    """Stream real-time ASR lines for a student upload, reject off-topic audio, and auto-sort into chapter."""
+    enrollment = _store().get_student_enrollment(current_user["id"])
+    class_level = int(enrollment.get("class_level") or current_user.get("class_level") or 10)
+    section = str(enrollment.get("section") or current_user.get("section") or "A")
+
+    suffix = Path(file.filename or "study_audio.wav").suffix.lower() or ".wav"
+    tmp_target = _store().path.parent / "recordings" / "_tmp" / f"{uuid4().hex}{suffix}"
+    await _stream_upload_to_path(file, tmp_target)
+
+    settings = SETTINGS.model_copy(deep=True)
+    settings.partials.enabled = True
+    settings.partials.after_s = min(settings.partials.after_s, 0.8)
+    settings.partials.interval_s = min(settings.partials.interval_s, 1.0)
+    settings.llm.enabled = use_llm and profile != "extractive"
+
+    precomputed_lines: list[TranscriptLine] = []
+    if lines_json.strip():
+        try:
+            raw_lines = json.loads(lines_json)
+            if isinstance(raw_lines, list):
+                for item in raw_lines:
+                    txt = str(item.get("text", "")).strip()
+                    if txt:
+                        precomputed_lines.append(
+                            TranscriptLine(
+                                text=txt,
+                                start=item.get("start"),
+                                end=item.get("end"),
+                            )
+                        )
+        except Exception:
+            precomputed_lines = []
+
+    async def event_generator():
+        saved = False
+        final_target: Path | None = None
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        try:
+            lines: list[TranscriptLine] = []
+            duration_s = 0.0
+            asr_info: dict[str, Any] = {"model": settings.asr.model}
+
+            if precomputed_lines:
+                lines = precomputed_lines
+                last_end = lines[-1].end or 0.0
+                first_start = lines[0].start or 0.0
+                duration_s = max(0.0, float(last_end) - float(first_start))
+            else:
+                yield _ndjson({"type": "status", "stage": "transcribing"})
+                task = asyncio.create_task(
+                    asyncio.to_thread(_iter_file_caption_queue, settings, tmp_target, queue, loop)
+                )
+                while True:
+                    kind, *rest = await queue.get()
+                    if kind == "event":
+                        ev: CaptionEvent = rest[0]
+                        yield _ndjson(ev.to_dict())
+                    elif kind == "error":
+                        status_code, detail = rest
+                        yield _ndjson({"type": "error", "status_code": status_code, "detail": detail})
+                        await task
+                        return
+                    elif kind == "asr_done":
+                        lines, duration_s, asr_info = rest
+                        break
+                await task
+
+            try:
+                matched_subject, syllabus_ctx, top_match = _match_student_audio_to_syllabus(
+                    lines, class_level, subject
+                )
+            except HTTPException as exc:
+                yield _ndjson({"type": "error", "status_code": exc.status_code, "detail": exc.detail})
+                return
+
+            chapter_number = int(top_match.chapter.number)
+            chapter_title = str(top_match.chapter.title)
+            matched_terms = list(top_match.matched_terms)
+            correlation_score = round(float(top_match.score), 2)
+            lesson_title = title.strip() or f"{chapter_title} — Self-Study Notes"
+
+            yield _ndjson({
+                "type": "status",
+                "stage": "generating_notes",
+                "subject": matched_subject,
+                "subject_label": SUBJECT_LABELS.get(matched_subject, matched_subject.title()),
+                "chapter_number": chapter_number,
+                "chapter_title": chapter_title,
+                "correlation_score": correlation_score,
+                "matched_terms": matched_terms,
+            })
+
+            notes_error: str | None = None
+            notes_dict: dict[str, Any] = {}
+            markdown = ""
+            try:
+                note_result = await asyncio.to_thread(
+                    _generate_notes_sync,
+                    settings,
+                    lines,
+                    title=lesson_title,
+                    profile=profile if settings.llm.enabled else None,
+                    syllabus=syllabus_ctx,
+                )
+                notes_dict = note_result.to_dict()
+                markdown = note_result.to_markdown()
+            except Exception as exc:
+                logger.exception("student note generation failed after streaming transcription")
+                notes_error = str(exc)
+
+            final_dir = _store().path.parent / "recordings" / f"class_{class_level}" / matched_subject / current_user["id"]
+            final_dir.mkdir(parents=True, exist_ok=True)
+            final_target = final_dir / tmp_target.name
+            shutil.move(str(tmp_target), str(final_target))
+
+            transcript_text = " ".join(line.text for line in lines)
+            rel_audio_path = final_target.relative_to(_store().path.parent).as_posix()
+            lesson_id = _store().create_lesson(
+                title=lesson_title,
+                class_level=class_level,
+                section=section,
+                subject=matched_subject,
+                chapter_number=chapter_number,
+                chapter_title=chapter_title,
+                teacher_id=current_user["id"],
+                teaching_date=date.today().isoformat(),
+                transcript=transcript_text,
+                notes_markdown=markdown,
+                notes_json=notes_dict,
+                duration_s=round(duration_s, 2),
+                audio_filename=file.filename,
+                audio_path=rel_audio_path,
+                status="student_private",
+            )
+            saved = True
+            _emit_realtime_event(
+                "student_lesson_created",
+                class_level=class_level,
+                target_user_id=current_user["id"],
+                data={"lesson_id": lesson_id, "subject": matched_subject, "chapter_number": chapter_number},
+            )
+            yield _ndjson({
+                "type": "done",
+                "lesson_id": lesson_id,
+                "title": lesson_title,
+                "subject": matched_subject,
+                "subject_label": SUBJECT_LABELS.get(matched_subject, matched_subject.title()),
+                "chapter_number": chapter_number,
+                "chapter_title": chapter_title,
+                "correlation_score": correlation_score,
+                "matched_terms": matched_terms,
+                "lines": [line.to_dict() for line in lines],
+                "transcript": transcript_text,
+                "duration_s": round(duration_s, 2),
+                "asr": asr_info,
+                "notes": notes_dict,
+                "markdown": markdown,
+                "notes_error": notes_error,
+                "audio_path": rel_audio_path,
+            })
+        finally:
+            with contextlib.suppress(OSError):
+                if not saved:
+                    tmp_target.unlink(missing_ok=True)
+                    if final_target is not None:
+                        final_target.unlink(missing_ok=True)
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+
+
 # ------------------------------------------------------------------ Q&A
 @app.post("/api/ask")
 async def ask_question(request: AskRequest, current_user: Annotated[dict, Depends(require_student)]) -> dict[str, Any]:
@@ -1397,6 +2068,7 @@ async def ask_question(request: AskRequest, current_user: Annotated[dict, Depend
     if request.class_level and request.class_level != current_user["class_level"]:
         raise HTTPException(403, "This class is outside your enrollment")
     level, name = _selection(request.class_level, request.subject)
+    norm_chapter = request.chapter if request.chapter and request.chapter > 0 else None
     if not request.lines and not request.text and not request.session_id:
         lessons = _store().list_lessons(
             class_level=current_user["class_level"],
@@ -1406,7 +2078,7 @@ async def ask_question(request: AskRequest, current_user: Annotated[dict, Depend
         combined_lessons = "\n".join(
             l["transcript"] + "\n" + l["notes_markdown"]
             for l in lessons
-            if not request.chapter or l["chapter_number"] == request.chapter
+            if not norm_chapter or l["chapter_number"] == norm_chapter
         ).strip()
         if combined_lessons:
             request.text = combined_lessons
@@ -1418,7 +2090,7 @@ async def ask_question(request: AskRequest, current_user: Annotated[dict, Depend
             norm_q,
             level,
             name,
-            request.chapter,
+            norm_chapter,
             bool(request.use_llm),
             request.profile or "default",
         )
@@ -1445,7 +2117,7 @@ async def ask_question(request: AskRequest, current_user: Annotated[dict, Depend
         engine.ask,
         request.question,
         use_llm=request.use_llm and llm is not None,
-        chapter=request.chapter,
+        chapter=norm_chapter,
     )
     payload = answer.to_dict()
     payload["source"] = meta
@@ -1567,6 +2239,13 @@ def answer_quiz(
                                   (request.quiz_id,current_user["id"])).fetchone()
             if link:
                 _store().record_lesson_activity(current_user["id"],link[0],"quiz_completed",{"score":result["progress"]["score"]})
+        _emit_realtime_event(
+            "quiz_updated",
+            class_level=current_user.get("class_level") if current_user else None,
+            target_user_id=current_user["id"] if current_user else None,
+            roles=("teacher", "student"),
+            data={"quiz_id": request.quiz_id, "completed": bool(result.get("completed"))},
+        )
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1744,7 +2423,11 @@ def student_subjects(
 
 def _published_lesson(lesson_id, current_user):
     lesson = _store().get_lesson(lesson_id)
-    if not lesson or lesson.get("status") != "published":
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found or not yet published by teacher")
+
+    is_own_private = lesson.get("status") == "student_private" and lesson.get("teacher_id") == current_user["id"]
+    if lesson.get("status") != "published" and not is_own_private:
         raise HTTPException(status_code=404, detail="Lesson not found or not yet published by teacher")
 
     enrollment = _store().get_student_enrollment(current_user["id"])
@@ -1763,6 +2446,13 @@ def student_lesson_detail(
     lesson = _published_lesson(lesson_id,current_user)
     _store().record_lesson_activity(current_user["id"], lesson_id, "opened", {"lesson_title": lesson["title"]})
     completion = _store().get_lesson_completion(current_user["id"], lesson_id)
+    _emit_realtime_event(
+        "student_activity",
+        class_level=lesson["class_level"],
+        target_user_id=current_user["id"],
+        roles=("teacher",),
+        data={"lesson_id": lesson_id, "event_type": "opened"},
+    )
     return {
         "lesson": lesson,
         "completion": completion,
@@ -1775,8 +2465,15 @@ def student_record_activity(
     request: LessonActivityRequest,
     current_user: Annotated[dict[str, Any], Depends(require_student)],
 ) -> dict[str, Any]:
-    _published_lesson(lesson_id,current_user)
+    lesson = _published_lesson(lesson_id,current_user)
     _store().record_lesson_activity(current_user["id"], lesson_id, request.event_type, {k:v for k,v in (request.metadata or {}).items() if k != "score"})
+    _emit_realtime_event(
+        "student_activity",
+        class_level=lesson["class_level"],
+        target_user_id=current_user["id"],
+        roles=("teacher",),
+        data={"lesson_id": lesson_id, "event_type": request.event_type},
+    )
     return {"status": "ok"}
 
 
@@ -1786,8 +2483,16 @@ def student_mark_lesson_complete(
     request: LessonCompleteRequest,
     current_user: Annotated[dict[str, Any], Depends(require_student)],
 ) -> dict[str, Any]:
-    _published_lesson(lesson_id,current_user)
-    return _store().mark_lesson_completed(current_user["id"], lesson_id, request.completed)
+    lesson = _published_lesson(lesson_id,current_user)
+    completion = _store().mark_lesson_completed(current_user["id"], lesson_id, request.completed)
+    _emit_realtime_event(
+        "student_activity",
+        class_level=lesson["class_level"],
+        target_user_id=current_user["id"],
+        roles=("teacher", "student"),
+        data={"lesson_id": lesson_id, "event_type": "completed", "completed": request.completed},
+    )
+    return completion
 
 
 @app.get("/api/student/notifications")
@@ -1964,6 +2669,13 @@ def teacher_update_lesson(
     )
     if not success:
         raise HTTPException(status_code=400, detail="Failed to update lesson")
+    _emit_realtime_event(
+        "lesson_updated",
+        class_level=lesson["class_level"],
+        target_user_id=current_user["id"],
+        roles=("student", "teacher"),
+        data={"lesson_id": lesson_id},
+    )
     return {"status": "ok", "message": "Lesson updated successfully"}
 
 
@@ -1983,6 +2695,13 @@ def teacher_publish_lesson(
     if not lesson["transcript"].strip() or not lesson["notes_markdown"].strip():
         raise HTTPException(422, "Review the transcript and notes before publishing")
     published = _store().publish_lesson(lesson_id, current_user["id"])
+    _emit_realtime_event(
+        "lesson_published",
+        class_level=lesson["class_level"],
+        target_user_id=current_user["id"],
+        roles=("student", "teacher"),
+        data={"lesson_id": lesson_id, "subject": lesson["subject"], "chapter_number": lesson["chapter_number"]},
+    )
     return {
         "status": "published",
         "lesson": published,
@@ -2004,6 +2723,13 @@ def teacher_archive_lesson(
     ):
         raise HTTPException(status_code=403, detail="Forbidden: You are not assigned to manage this lesson's class")
     _store().archive_lesson(lesson_id, current_user["id"])
+    _emit_realtime_event(
+        "lesson_archived",
+        class_level=lesson["class_level"],
+        target_user_id=current_user["id"],
+        roles=("student", "teacher"),
+        data={"lesson_id": lesson_id},
+    )
     return {"status": "archived", "message": "Lesson archived"}
 
 
@@ -2289,6 +3015,134 @@ async def _pump(
             await websocket.send_json({"type": "done"})
 
 
+@app.websocket("/ws/live-mic")
+async def live_mic_captions(websocket: WebSocket) -> None:
+    """Stream real-time partial & final transcripts from browser microphone PCM frames (teacher & student)."""
+    token = extract_token(
+        ila_session=websocket.cookies.get("ila_session"),
+        authorization=websocket.headers.get("authorization"),
+    ) or websocket.query_params.get("token")
+    user = _store().get_auth_session(token) if token else None
+    if not user or user.get("role") not in ("teacher", "student"):
+        await websocket.close(code=4401)
+        return
+
+    await websocket.accept()
+    settings = SETTINGS.model_copy(deep=True)
+    settings.partials.enabled = True
+    settings.partials.after_s = min(settings.partials.after_s, 0.9)
+    settings.partials.interval_s = min(settings.partials.interval_s, 1.1)
+    settings.vad.start_margin_db = min(settings.vad.start_margin_db, 5.5)
+    settings.vad.end_margin_db = min(settings.vad.end_margin_db, 2.5)
+    settings.vad.min_silence_ms = max(settings.vad.min_silence_ms, 650)
+    settings.vad.min_speech_ms = min(settings.vad.min_speech_ms, 250)
+    settings.asr.no_speech_threshold = max(settings.asr.no_speech_threshold, 0.75)
+    settings.asr.logprob_threshold = min(settings.asr.logprob_threshold, -1.25)
+
+    await websocket.send_json({"type": "status", "stage": "loading_model", "model": settings.asr.model})
+    try:
+        asr = await asyncio.to_thread(REGISTRY.get, settings)
+    except Exception as exc:
+        logger.exception("failed to load ASR model for live mic")
+        await websocket.send_json({"type": "error", "message": str(exc)})
+        await websocket.close()
+        return
+
+    await websocket.send_json({"type": "ready", "schema": SCHEMA_VERSION, "asr": asr.info.to_dict()})
+
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[Any] = asyncio.Queue()
+    source = QueueAudioSource(sample_rate=settings.audio.sample_rate)
+    stop = threading.Event()
+    sentinel = object()
+
+    def worker() -> None:
+        try:
+            with TRANSCRIBE_LOCK:
+                pipeline = CaptionPipeline.from_settings(settings, source, asr)
+                for event in pipeline.events(stop=stop.is_set):
+                    loop.call_soon_threadsafe(queue.put_nowait, event)
+        except Exception as exc:
+            logger.exception("live-mic caption worker failed")
+            loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "message": str(exc)})
+        finally:
+            source.close()
+            loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+
+    thread = threading.Thread(target=worker, name="ila-live-mic", daemon=True)
+    thread.start()
+
+    async def recv_audio() -> None:
+        try:
+            while True:
+                msg = await websocket.receive()
+                if msg.get("type") == "websocket.disconnect":
+                    break
+                if msg.get("bytes"):
+                    source.push(msg["bytes"])
+                elif msg.get("text"):
+                    try:
+                        data = json.loads(msg["text"])
+                        if isinstance(data, dict) and data.get("action") == "stop":
+                            break
+                    except Exception:
+                        pass
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            pass
+        finally:
+            source.close()
+
+    receiver = asyncio.create_task(recv_audio())
+    try:
+        while True:
+            item = await queue.get()
+            if item is sentinel:
+                break
+            if isinstance(item, CaptionEvent):
+                await websocket.send_json(item.to_dict())
+            else:
+                await websocket.send_json(item)
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "done"})
+    except WebSocketDisconnect:
+        stop.set()
+    finally:
+        stop.set()
+        source.close()
+        receiver.cancel()
+        if thread.is_alive():
+            await asyncio.to_thread(thread.join, 5.0)
+
+
+@app.websocket("/ws/events")
+async def realtime_events(websocket: WebSocket) -> None:
+    """Push real-time lesson, notification, and student-activity updates to connected portals."""
+    token = extract_token(
+        ila_session=websocket.cookies.get("ila_session"),
+        authorization=websocket.headers.get("authorization"),
+    ) or websocket.query_params.get("token")
+    user = _store().get_auth_session(token) if token else None
+    if not user:
+        await websocket.close(code=4401)
+        return
+
+    REALTIME_HUB.attach_loop(asyncio.get_running_loop())
+    await websocket.accept()
+    REALTIME_HUB.register(websocket, user)
+    try:
+        await websocket.send_json({"type": "connected", "role": user.get("role")})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        REALTIME_HUB.unregister(websocket)
+
+
 # ---------------------------------------------------------------- dashboard & notes view
 HTML_NOTES_DIR = NOTES_DIR / "html"
 if HTML_NOTES_DIR.is_dir():
@@ -2301,6 +3155,16 @@ if HTML_NOTES_DIR.is_dir():
 from starlette.exceptions import HTTPException as StaticHTTPException
 
 class SPAStaticFiles(StaticFiles):
+    @staticmethod
+    def _no_cache_index(index_path: Path) -> FileResponse:
+        return FileResponse(
+            index_path,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
+
     async def get_response(self, path: str, scope: Any) -> Response:
         if scope.get("type") == "http" and str(scope.get("path", "")).startswith("/api"):
             raise HTTPException(status_code=404, detail="API endpoint not found")
@@ -2309,13 +3173,16 @@ class SPAStaticFiles(StaticFiles):
             if response.status_code == 404 and scope.get("method") in ("GET", "HEAD"):
                 index_path = Path(self.directory) / "index.html"
                 if index_path.is_file():
-                    return FileResponse(index_path)
+                    return self._no_cache_index(index_path)
+            if (path in ("", ".", "index.html") or response.media_type == "text/html") and response.status_code == 200:
+                response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+                response.headers["Pragma"] = "no-cache"
             return response
         except StaticHTTPException as exc:
             if exc.status_code == 404 and scope.get("method") in ("GET", "HEAD") and not str(scope.get("path", "")).startswith("/api"):
                 index_path = Path(self.directory) / "index.html"
                 if index_path.is_file():
-                    return FileResponse(index_path)
+                    return self._no_cache_index(index_path)
             raise
 
 

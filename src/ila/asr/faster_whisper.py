@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -37,6 +37,7 @@ class FasterWhisperProvider:
 
     def __init__(self, settings: AsrSettings) -> None:
         self._settings = settings
+        self._batched: Any = None
         self._info = self._load_model()
 
     # ------------------------------------------------------------------ loading
@@ -150,3 +151,103 @@ class FasterWhisperProvider:
             no_speech_prob=max(no_speech) if no_speech else 1.0,
             duration_s=samples.size / 16_000,
         )
+
+    def transcribe_stream(
+        self,
+        audio: np.ndarray,
+        *,
+        initial_prompt: str | None = None,
+        language: str | None = None,
+        final: bool = True,
+    ) -> TranscriptResult:
+        """Optimized single-window decode for real-time mic streaming.
+
+        Uses Silero VAD (matching the batch file path) plus greedy ``beam_size=1``
+        for fast partials and capped beam search for finals so CPU inference keeps
+        pace with live microphone audio.
+        """
+        settings = self._settings
+        samples = np.ascontiguousarray(audio, dtype=np.float32).reshape(-1)
+        if samples.size == 0:
+            return TranscriptResult(text="")
+
+        if not final and samples.size > 16_000 * 12:
+            samples = samples[-16_000 * 12 :]
+
+        beam = min(settings.beam_size, 3) if final else 1
+        segments, info = self._model.transcribe(
+            samples,
+            language=language if language is not None else settings.language,
+            beam_size=beam,
+            initial_prompt=initial_prompt or None,
+            condition_on_previous_text=False,
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 350, "speech_pad_ms": 200},
+            without_timestamps=True,
+            word_timestamps=False,
+        )
+
+        texts: list[str] = []
+        logprobs: list[float] = []
+        no_speech: list[float] = []
+        for segment in segments:
+            text = segment.text.strip()
+            if text:
+                texts.append(text)
+            logprobs.append(float(segment.avg_logprob))
+            no_speech.append(float(segment.no_speech_prob))
+
+        return TranscriptResult(
+            text=" ".join(texts).strip(),
+            language=getattr(info, "language", None),
+            avg_logprob=float(np.mean(logprobs)) if logprobs else -10.0,
+            no_speech_prob=max(no_speech) if no_speech else 1.0,
+            duration_s=samples.size / 16_000,
+        )
+
+    def transcribe_file_batched(
+        self,
+        path: str | Path,
+        *,
+        batch_size: int = 8,
+        language: str | None = None,
+    ) -> tuple[list[tuple[str, float, float]], float]:
+        """Transcribe an uploaded audio/video file on CPU in parallel VAD batches."""
+        from faster_whisper import BatchedInferencePipeline
+        from ila.audio import decode_audio
+        from ila.text import normalize_transcript
+
+        samples = decode_audio(path, sample_rate=16_000)
+        duration_s = float(samples.size) / 16_000.0
+        if samples.size == 0:
+            return [], 0.0
+
+        if self._batched is None:
+            self._batched = BatchedInferencePipeline(model=self._model)
+
+        settings = self._settings
+        segments, _ = self._batched.transcribe(
+            samples,
+            language=language if language is not None else settings.language,
+            beam_size=settings.beam_size,
+            batch_size=max(1, batch_size),
+            vad_filter=True,
+            without_timestamps=False,
+            word_timestamps=False,
+            condition_on_previous_text=False,
+            no_speech_threshold=settings.no_speech_threshold,
+            log_prob_threshold=settings.logprob_threshold,
+        )
+
+        lines: list[tuple[str, float, float]] = []
+        for segment in segments:
+            text = normalize_transcript(segment.text)
+            if not text:
+                continue
+            no_speech = float(getattr(segment, "no_speech_prob", 0.0))
+            avg_logprob = float(getattr(segment, "avg_logprob", 0.0))
+            if no_speech >= settings.no_speech_threshold and avg_logprob <= settings.logprob_threshold:
+                continue
+            lines.append((text, round(float(segment.start), 2), round(float(segment.end), 2)))
+
+        return lines, duration_s

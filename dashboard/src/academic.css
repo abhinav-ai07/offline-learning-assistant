@@ -5,31 +5,78 @@ html,body,#root {height:auto;min-height:100%;overflow:visible}
 :root {--paper:#f4f6f4;--ink:#1a2b2b;--rule:#dce5df;--teal:#16786c;--reading:Georgia,"Times New Roman",serif}
 [data-theme="light"] {--bg-app:var(--paper);--bg-surface:#ffffff;--bg-surface-subtle:#f0f4f1;--text-primary:var(--ink);--text-secondary:#536462;--text-muted:#748582;--border-default:var(--rule);--accent:var(--teal);--accent-text:#126b60;--accent-subtle:#e8f2ee;--danger-text:#b42318}
 .academic-shell {display:grid;grid-template-columns:clamp(178px,17vw,222px) minmax(0,1fr);min-height:100vh;background:var(--bg-app);color:var(--text-primary);font:15px/1.55 system-ui,sans-serif}
-.academic-rail {position:sticky;top:0;align-self:start;height:100dvh;overflow:auto;display:flex;flex-direction:column;background:linear-gradient(180deg,#17343a 0%,#1b4143 100%);color:#fff;padding:24px 13px;box-shadow:2px 0 12px rgba(25,55,49,.14)}
-.school-brand,.school.entry>header {display:flex;align-items:center;gap:12px}
-.school-brand {padding:0 8px 24px;border-bottom:1px solid rgba(226,241,235,.16)}
+.academic-rail {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100dvh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #17343a 0%, #1b4143 100%);
+  color: #fff;
+  padding: 24px 13px;
+  box-shadow: 2px 0 12px rgba(25,55,49,.14);
+}
+[data-theme="dark"] .academic-rail {
+  background: #080f0c;
+  border-right: 1px solid var(--border-subtle);
+}
+.school-brand,.school.entry>header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.school-brand {
+  padding: 0 8px 24px;
+  border-bottom: 1px solid rgba(226,241,235,.16);
+}
+[data-theme="dark"] .school-brand {
+  border-bottom-color: var(--border-default);
+}
 .school-brand strong,.entry header strong {display:block;font:600 1.6rem/1.1 var(--reading);letter-spacing:.04em}
 .school-brand small {color:#b8cec7;font-size:.8rem}
 .school-mark {display:inline-grid;place-items:center;width:42px;height:42px;border:1px solid #6b9b8e;border-radius:6px;color:#e2f2eb}
 .rail-body {display:flex;flex:1;flex-direction:column;gap:24px}
 .rail-body nav {display:grid;gap:4px;padding-top:22px}
-.rail-body button,.menu-toggle {display:block;text-align:left;width:100%;background:transparent;color:#d8e6e0;border:0;padding:11px 13px;font:500 .94rem/1.35 system-ui;border-radius:4px;cursor:pointer}
-.rail-body nav button:hover,.rail-footer button:hover {background:#285455}
-.rail-body nav button[aria-current=page] {background:#f4f6f4;color:#17343a;font-weight:600;box-shadow:inset 3px 0 #39a18d}
-.rail-footer {margin-top:auto;border-top:1px solid rgba(226,241,235,.16);padding-top:12px}
-.menu-toggle {display:none}
-.academic-main,.learning-content,.learning-content>* {min-width:0}
-.academic-mast {box-shadow:0 1px 3px rgba(11,37,69,.06);display:flex;justify-content:space-between;align-items:center;gap:16px;min-height:61px;padding:10px clamp(16px,3vw,46px);border-bottom:1px solid var(--border-default);background:var(--bg-surface)}
-.mast-tools {display:flex;align-items:center;gap:10px;min-width:0}
-.mast-name {font-size:.9rem;overflow-wrap:anywhere}
-.learning-content {padding:20px clamp(16px,3vw,46px) 56px;max-width:1530px;margin-inline:auto}
-.learning-content :is(h1,h2),.entry h1 {font-family:var(--reading);letter-spacing:-.025em;line-height:1.18}
-.learning-content h1,.learning-content [class*="header-bar"] h2,.learning-content .hero-text h2 {font-size:clamp(1.55rem,2.3vw,2.1rem)}
-.learning-content h3 {font-size:1.1rem}
-.learning-content :is(.dashboard-card,.selected-class-card,.tab-pane-card,.library-filter-panel,.form-grid,.studio-step-body) {border-radius:10px;box-shadow:0 1px 2px rgba(11,37,69,.06),0 4px 14px rgba(11,37,69,.04)}
-.learning-content :is(.teacher-hero-banner,.student-welcome-banner,.lesson-hero-card,.class-card-hero) {background:var(--bg-surface-subtle);color:var(--text-primary);border:0;border-left:4px solid var(--accent);border-radius:0 10px 10px 0;padding:18px 20px;background-image:linear-gradient(90deg,#e8f2ee,#f5f7f5)}
-.learning-content :is(.teacher-hero-banner,.student-welcome-banner,.lesson-hero-card,.class-card-hero) :is(h1,h2,h3,p,span) {color:inherit}
-.school .page-intro {padding:0 0 18px;background:transparent;color:var(--text-primary);display:block;border-bottom:1px solid var(--border-default)}
+.rail-body button,.menu-toggle {
+  display: block;
+  text-align: left;
+  width: 100%;
+  background: transparent;
+  color: #d8e6e0;
+  border: 0;
+  padding: 11px 13px;
+  font: 500 .94rem/1.35 system-ui;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.rail-body nav button:hover,.rail-footer button:hover {
+  background: #285455;
+}
+[data-theme="dark"] .rail-body nav button:hover,
+[data-theme="dark"] .rail-footer button:hover {
+  background: #13221c;
+}
+.rail-body nav button[aria-current=page] {
+  background: #f4f6f4;
+  color: #17343a;
+  font-weight: 600;
+  box-shadow: inset 3px 0 #39a18d;
+}
+[data-theme="dark"] .rail-body nav button[aria-current=page] {
+  background: rgba(34,160,137,.18);
+  color: #99f6e4;
+  box-shadow: inset 3px 0 #2dd4bf;
+}
+.rail-footer {
+  margin-top: auto;
+  border-top: 1px solid rgba(226,241,235,.16);
+  padding-top: 12px;
+}
+[data-theme="dark"] .rail-footer {
+  border-top-color: var(--border-default);
+}
 .school .page-intro h1 {margin:0 0 6px}
 .school-office {width:100%;max-width:1080px;min-height:0;margin-inline:auto;background:transparent;color:var(--text-primary);font:inherit}
 .school-office.school-classes {max-width:960px}
@@ -45,26 +92,50 @@ html,body,#root {height:auto;min-height:100%;overflow:visible}
 .account-form h2,.account-form [role=alert] {grid-column:1/-1;margin:0}
 .school-office form button {justify-self:start}
 .school [role=status]:empty,.school [role=alert]:empty {display:none}
-.school [role=alert] {color:var(--danger-text)}
-.school.entry {background:linear-gradient(180deg,#edf3ef 0%,#f6f7f5 100%)}
-.school.entry>header {justify-content:start;background:linear-gradient(90deg,#17343a,#1b4143);padding:.8rem clamp(16px,4vw,56px)}
-.entry header span:last-child {border-left:1px solid #51766e;padding-left:14px;font-size:.88rem}
+.page-intro {
+  padding: 0 0 18px;
+  background: transparent;
+  color: inherit;
+  display: block;
+  border-bottom: 1px solid var(--border-default);
+}
+.school .page-intro {
+  color: var(--text-primary);
+}
+=======
+.school [role=alert] {color:#ae3425}
+.school.entry {background:var(--bg-app)}
+.school.entry>header {justify-content:start;background:#193a45;padding:.8rem clamp(16px,4vw,56px)}
+[data-theme="dark"] .school.entry>header {background:#080f0c;border-bottom:1px solid var(--border-subtle)}
+.entry header span:last-child {border-left:1px solid #68838a;padding-left:14px;font-size:.88rem}
 .school.entry section {max-width:550px;margin:clamp(12px,5vh,54px) auto;padding:24px;overflow:visible}
-.school.entry form {background:#ffffff;color:#1a2b2b;box-shadow:0 10px 30px rgba(25,55,49,.1);border-top:3px solid #16786c}
+.school.entry form {background:var(--bg-surface);color:var(--text-primary)}
+>>>>>>> origin/main
 .school.entry nav {justify-content:space-between;margin-bottom:1.6rem}
 .school.entry form>button {justify-self:stretch}
 .academic-shell :is(input:not([type=checkbox]):not([type=radio]),select,textarea),.school :is(input,select,textarea) {min-width:0;max-width:100%;min-height:42px;font:inherit;color:var(--text-primary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:4px;padding:.55rem .7rem}
+.academic-shell .input-with-icon .form-input,.academic-shell .chapter-search-box input {min-height:40px;height:40px;padding:6px 12px 6px 36px;font-size:.84rem;background:var(--bg-surface)}
 .school label {font-size:.91rem;line-height:1.4}
 .school label input,.school label select,.password-field {width:100%}
 .password-field {display:flex;align-items:stretch}
 .password-field input {flex:1;min-width:0}
+<<<<<<< HEAD
 .school .password-field button {background:#e8f2ee;color:#126b60;font-size:.82rem;border:1px solid #c5dcd2;margin-left:4px}
+=======
+.school .password-field button {background:var(--bg-surface-subtle);color:var(--accent-text);font-size:.82rem;border:1px solid var(--border-default);margin-left:4px}
+>>>>>>> origin/main
 .academic-dialog.school {position:fixed;inset:0;margin:auto;width:min(94vw,420px);height:fit-content;min-height:0;max-height:90dvh;overflow:auto;border:0;border-radius:6px;color:var(--text-primary);background:var(--bg-surface);padding:0}
 .academic-dialog::backdrop {background:rgba(18,39,39,.7)}
 .academic-dialog form {margin:0}
+<<<<<<< HEAD
 .skip-link {position:absolute;left:8px;top:-80px;z-index:20}.skip-link:focus {top:8px;background:white;padding:10px}
 .academic-shell :focus-visible,.school :focus-visible {outline:3px solid #2563eb;outline-offset:2px}
+=======
+.skip-link {position:absolute;left:8px;top:-80px;z-index:20}.skip-link:focus {top:8px;background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--accent);padding:10px}
+.academic-shell :focus-visible,.school :focus-visible {outline:3px solid #4a92bb;outline-offset:2px}
+>>>>>>> origin/main
 .learning-content table {display:block;max-width:100%;overflow-x:auto;border-collapse:collapse}
+.learning-content .analytics-table,.learning-content .timetable-table {display:table;width:100%}
 .learning-content table :is(th,td) {padding:.7rem .9rem;text-align:left}
 .learning-content table th {background:var(--bg-surface-subtle);font-size:.84rem}
 .learning-content .ask-ila-workspace,.learning-content .chat-messages-scroll-area {height:auto;max-height:none;overflow:visible}

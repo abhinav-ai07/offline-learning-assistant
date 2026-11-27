@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { getClassSubjects, askQuestion, getClassChapters } from "../../../api";
 import { messageOf } from "../../../format";
 import type { AskResponse, AuthUser, ChapterInfo, DemoLine, LessonDetail } from "../../../types";
+import { MathMarkdown } from "../../../shared/components/MathMarkdown";
 import {
   BookIcon,
   CheckCircleIcon,
@@ -21,6 +22,7 @@ interface ChatMessage {
   sender: "student" | "ila";
   text: string;
   sources?: any[];
+  engine?: string;
   timestamp: string;
 }
 
@@ -28,7 +30,7 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
   const [subjects,setSubjects] = useState<{code:string;name:string}[]>([]);
   useEffect(()=>{getClassSubjects(user.class_level).then(setSubjects).catch(e=>setError(messageOf(e)));},[user.class_level]);
   const [subject, setSubject] = useState(initialLesson?.subject || "science");
-  const [chapter, setChapter] = useState<number | null>(initialLesson?.chapter_number || 1);
+  const [chapter, setChapter] = useState<number | null>(initialLesson?.chapter_number ?? null);
   const [chaptersList, setChaptersList] = useState<ChapterInfo[]>([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
@@ -69,11 +71,8 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
     getClassChapters(user.class_level, subject)
       .then((chaps) => {
         setChaptersList(chaps);
-        if (chaps.length > 0 && !chapter) {
-          setChapter(chaps[0].chapter_number);
-        }
       })
-      .catch(() => {});
+      .catch(() => setChaptersList([]));
   }, [subject, user.class_level]);
 
   const handleSend = async (e?: React.FormEvent) => {
@@ -118,7 +117,8 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
         id: `reply-${Date.now()}`,
         sender: "ila",
         text: resp.answer,
-        sources: resp.source ? [resp.source] : [],
+        sources: resp.citations && resp.citations.length > 0 ? resp.citations : [],
+        engine: resp.engine,
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
 
@@ -166,6 +166,7 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
         </svg>
       </header>
 
+<<<<<<< HEAD
       {attachedLesson ? (
         <div className="attached-context-badge">
           <BookIcon width={14} height={14} />
@@ -184,6 +185,39 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
             Chapter
             <select value={chapter || ""} onChange={(e) => setChapter(Number(e.target.value))}>
               <option value="">General NCERT Curriculum</option>
+=======
+        {attachedLesson ? (
+          <div className="attached-context-badge">
+            <BookIcon width={14} height={14} />
+            <span>Context: <strong>{attachedLesson.title}</strong></span>
+            <button
+              type="button"
+              className="btn-link-subtle"
+              onClick={() => setAttachedLesson(null)}
+            >
+              Clear Lesson
+            </button>
+          </div>
+        ) : (
+          <div className="context-selector-row">
+            <select
+              className="form-select form-select-sm"
+              value={subject}
+              onChange={(e) => {
+                setSubject(e.target.value);
+                setChapter(null);
+              }}
+            >
+              {subjects.map(s=><option key={s.code} value={s.code}>{s.name}</option>)}
+            </select>
+
+            <select
+              className="form-select form-select-sm"
+              value={chapter ?? ""}
+              onChange={(e) => setChapter(e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">General Subject &amp; NCERT Curriculum</option>
+>>>>>>> origin/main
               {chaptersList.map((ch) => (
                 <option key={ch.chapter_number} value={ch.chapter_number}>
                   {ch.title}
@@ -213,18 +247,28 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
                 <span className="chat-timestamp">{msg.timestamp}</span>
               </div>
 
-              <div className="chat-bubble-text">{msg.text}</div>
+              <div className="chat-bubble-text">
+                {msg.sender === "ila" ? <MathMarkdown>{msg.text}</MathMarkdown> : msg.text}
+              </div>
 
               {msg.sources && msg.sources.length > 0 && (
                 <div className="chat-sources-accordion">
-                  <span className="sources-label">Verified NCERT &amp; Lecture Sources:</span>
+                  <span className="sources-label">
+                    {msg.engine === "llm+syllabus"
+                      ? "Curriculum & Subject Context:"
+                      : "Verified NCERT & Lecture Sources:"}
+                  </span>
                   <ul className="sources-list">
-                    {msg.sources.slice(0, 3).map((src: any, idx: number) => (
-                      <li key={idx} className="source-item">
-                        <strong>[{src.source || "NCERT Text"}]:</strong>{" "}
-                        <span>{src.text?.slice(0, 140)}...</span>
-                      </li>
-                    ))}
+                    {msg.sources.slice(0, 3).map((src: any, idx: number) => {
+                      const snippet = src.snippet || src.text || "";
+                      const label = src.title || src.source || "Syllabus";
+                      return (
+                        <li key={idx} className="source-item">
+                          <strong>[{label}]:</strong>{" "}
+                          <span>{snippet.slice(0, 160)}{snippet.length > 160 ? "..." : ""}</span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}

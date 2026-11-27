@@ -78,7 +78,18 @@ _META_WORDS = frozenset(
     summary summarize summarises summarising point points key idea ideas term terms lecture
     professor teacher speaker instructor explain explains explained discussing discuss
     discusses mentioned mentions covers cover covered talk talks talked topic topics
+    frac sqrt cdot times div pm mp neq leq geq eq approx theta alpha beta gamma delta rho pi
     """.split()  # noqa: SIM905
+)
+
+_LATEX_CMD = re.compile(r"\\[a-zA-Z]+")
+_SPOKEN_CHATTER = re.compile(
+    r"(?:^(?:but|so|well|okay|alright|now|basically|actually)\b.*\b(?:you can also say|going to be)\b|"
+    r"\bcomma\b|\byou can also say\b)",
+    re.IGNORECASE,
+)
+_WEAK_TERM_STARTS = frozenset(
+    {"say", "let", "take", "find", "look", "see", "get", "put", "make", "call", "called", "line", "point", "thing", "part", "way", "one", "two", "step"}
 )
 
 
@@ -165,9 +176,10 @@ def _stem(token: str) -> str:
 
 
 def _evidence_tokens(text: str) -> set[str]:
+    cleaned = _LATEX_CMD.sub(" ", text)
     return {
         _stem(token)
-        for token in content_tokens(text)
+        for token in content_tokens(cleaned)
         if token not in _META_WORDS
     }
 
@@ -304,15 +316,35 @@ def extract_keywords(sentences: Sequence[Sentence], *, limit: int = 12) -> list[
 
 
 # -------------------------------------------------------------------- definitions
+def _is_coherent_definition(term: str, body: str) -> bool:
+    """Reject conversational fragments, filler prefixes, and generic single-word nouns."""
+    term_clean = term.strip().lower()
+    if not term_clean or len(term_clean) < 3:
+        return False
+    term_words = words(term_clean)
+    if not term_words or term_words[0] in _WEAK_TERM_STARTS:
+        return False
+    if len(term_words) == 1 and term_words[0] in _WEAK_TERM_STARTS:
+        return False
+    if _SPOKEN_CHATTER.search(term) or _SPOKEN_CHATTER.search(body):
+        return False
+    return len(body.strip()) >= 12
+
+
 def find_definitions(sentences: Sequence[Sentence], *, limit: int = 6) -> list[Definition]:
     found: list[Definition] = []
     seen: set[str] = set()
     for sentence in sentences:
+        if _SPOKEN_CHATTER.search(sentence.text):
+            continue
         match = _DEFINITION.match(sentence.text)
         if not match:
             continue
-        term = " ".join(content_tokens(match.group("term"))[:4]).strip()
+        raw_term = match.group("term").strip()
+        term = " ".join(content_tokens(raw_term)[:4]).strip()
         if not term or term in seen:
+            continue
+        if not _is_coherent_definition(term, sentence.text):
             continue
         seen.add(term)
         found.append(Definition(term=term, text=sentence.text, start=sentence.start))
@@ -431,10 +463,12 @@ def format_timestamp(seconds: float | None) -> str:
 
 # ---------------------------------------------------------------------- prompting
 SYSTEM_PROMPT = (
-    "You are an offline study-notes assistant. Use only the transcript excerpt "
-    "the user provides. Never add outside facts, examples, or opinions. If the "
-    "excerpt does not support a point, leave it out. Write plain text in the "
-    "same language as the excerpt."
+    "You are an offline study-notes assistant. Use only facts supported by the transcript "
+    "excerpt the user provides. Rewrite messy spoken explanations into clean, self-contained "
+    "academic notes (using LaTeX $...$ for formulas when helpful). Actively omit spoken "
+    "filler, casual slide chatter (e.g. 'you can also say', 'negative 3 comma 0'), random "
+    "example coordinates, or incomplete fragments that do not make sense on their own. "
+    "Never invent outside facts, examples, or opinions."
 )
 
 
@@ -447,16 +481,17 @@ def build_system_prompt(syllabus: SyllabusContext | None = None) -> str:
 BLOCK_PROMPT = """Transcript excerpt:
 {excerpt}
 
-Write study notes for this excerpt using exactly this layout:
+Write clean study notes covering ONLY meaningful concepts, laws, formulas, and facts from this excerpt. Ignore conversational chatter, filler, or random worked coordinates.
+Use this exact layout:
 
-SUMMARY: <one sentence>
+SUMMARY: <one concise sentence>
 POINTS:
-- <key idea>
-- <key idea>
+- <self-contained key point or formula>
+- <self-contained key point or formula>
 TERMS:
-- <term>: <short definition>
+- <Proper Concept Name>: <clear textbook-style definition>
 
-Rules: 2 to 5 POINTS, at most 3 TERMS, no preamble, no headings.
+Rules: 2 to 6 clean POINTS, 0 to 4 genuine academic TERMS (skip vague words like "line" or "point" or conversational examples), no preamble, no headings.
 """
 
 REDUCE_PROMPT = """These are summaries of consecutive parts of one lecture:
@@ -527,7 +562,7 @@ def _acceptable(text: str, evidence: set[str]) -> bool:
         return False
     if not any(char.isalnum() for char in text):
         return False
-    if _REFUSAL.search(text):
+    if _REFUSAL.search(text) or _SPOKEN_CHATTER.search(text):
         return False
     candidate = _evidence_tokens(text)
     if len(candidate) < 2:
@@ -641,7 +676,8 @@ class NotesGenerator:
             if llm_points:
                 used_llm = True
                 points = llm_points
-                definitions = _dedupe_definitions(llm_terms + definitions)[:6]
+                # Prefer clean LLM-curated terms; never dilute them with noisy regex matches.
+                definitions = _dedupe_definitions(llm_terms)[:6] if llm_terms else []
                 summary = (
                     self._merge_summaries(summaries, evidence, deadline, system_prompt)
                     or summary
@@ -700,7 +736,7 @@ class NotesGenerator:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": BLOCK_PROMPT.format(excerpt=excerpt)},
                     ],
-                    max_tokens=self.settings.max_tokens,
+                    max_tokens=max(self.settings.max_tokens, 450),
                     temperature=self.settings.temperature,
                 )
             except Exception as exc:  # runtime/model errors must not lose the transcript
@@ -731,7 +767,11 @@ class NotesGenerator:
                 term_supported = bool(term_tokens) and (
                     len(term_tokens & evidence) / len(term_tokens) >= 0.5
                 )
-                if not _acceptable(text, evidence) or not term_supported:
+                if (
+                    not _acceptable(text, evidence)
+                    or not term_supported
+                    or not _is_coherent_definition(term, body)
+                ):
                     dropped += 1
                     continue
                 definitions.append(

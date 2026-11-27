@@ -23,6 +23,7 @@ import type {
   StoredLectureNotesResponse,
   StudentOverview,
   StudentProgress,
+  StudentTranscribeResponse,
   SubjectInfo,
   SubjectTree,
   TeacherClassOverview,
@@ -139,6 +140,141 @@ export function transcribeFile(
     method: "POST",
     body,
   });
+}
+
+export interface StreamTranscriptCallbacks {
+  onStatus?: (event: { stage?: string; [key: string]: any }) => void;
+  onCaption?: (event: {
+    kind: "partial" | "final";
+    id?: number;
+    text: string;
+    start?: number;
+    end?: number;
+  }) => void;
+}
+
+async function readNdjsonStream<T>(
+  path: string,
+  body: FormData,
+  callbacks: StreamTranscriptCallbacks = {},
+): Promise<T> {
+  const token = getStoredToken();
+  const headers = new Headers();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const response = await fetch(path, {
+    method: "POST",
+    headers,
+    body,
+    credentials: "include",
+  });
+  if (!response.ok) {
+    let detail = response.statusText || `Request failed (${response.status})`;
+    try {
+      const errBody = (await response.json()) as { detail?: string; message?: string };
+      detail = errBody.detail ?? errBody.message ?? detail;
+    } catch {
+      // Ignore parse error
+    }
+    throw new Error(detail);
+  }
+  if (!response.body) {
+    throw new Error("Streaming response is not supported by this browser.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let donePayload: T | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newlineIndex = buffer.indexOf("\n");
+    while (newlineIndex !== -1) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line) {
+        const msg = JSON.parse(line);
+        if (msg.type === "status") {
+          callbacks.onStatus?.(msg);
+        } else if (msg.type === "caption") {
+          callbacks.onCaption?.(msg);
+        } else if (msg.type === "error") {
+          throw new Error(msg.detail || msg.message || "Transcription failed");
+        } else if (msg.type === "done") {
+          donePayload = msg as T;
+        }
+      }
+      newlineIndex = buffer.indexOf("\n");
+    }
+  }
+  if (!donePayload) {
+    throw new Error("Stream ended before completion.");
+  }
+  return donePayload;
+}
+
+export function transcribeFileStream(
+  file: File,
+  options: Pick<TranscribeOptions, "classLevel" | "subject">,
+  callbacks: StreamTranscriptCallbacks = {},
+): Promise<TranscribeResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("class_level", String(options.classLevel));
+  body.append("subject", options.subject);
+  return readNdjsonStream<TranscribeResponse>("/api/transcribe/stream", body, callbacks);
+}
+
+export interface StudentTranscribeOptions {
+  subject?: string;
+  profile?: string;
+  useLlm?: boolean;
+  title?: string;
+  lines?: DemoLine[];
+}
+
+export function studentTranscribeFile(
+  file: File,
+  options: StudentTranscribeOptions = {},
+): Promise<StudentTranscribeResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("subject", options.subject ?? "auto");
+  body.append("profile", options.profile ?? "auto");
+  body.append("use_llm", String(options.useLlm ?? true));
+  if (options.title) {
+    body.append("title", options.title);
+  }
+  if (options.lines && options.lines.length > 0) {
+    body.append("lines_json", JSON.stringify(options.lines));
+  }
+  return request<StudentTranscribeResponse>("/api/student/transcribe", {
+    method: "POST",
+    body,
+  });
+}
+
+export function studentTranscribeFileStream(
+  file: File,
+  options: StudentTranscribeOptions = {},
+  callbacks: StreamTranscriptCallbacks = {},
+): Promise<StudentTranscribeResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("subject", options.subject ?? "auto");
+  body.append("profile", options.profile ?? "auto");
+  body.append("use_llm", String(options.useLlm ?? true));
+  if (options.title) {
+    body.append("title", options.title);
+  }
+  if (options.lines && options.lines.length > 0) {
+    body.append("lines_json", JSON.stringify(options.lines));
+  }
+  return readNdjsonStream<StudentTranscribeResponse>("/api/student/transcribe/stream", body, callbacks);
 }
 
 export interface NcertNoteItem {

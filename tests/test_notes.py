@@ -259,3 +259,28 @@ def test_markdown_is_stable() -> None:
     assert markdown.startswith("# RAG\n")
     assert "## Summary" in markdown
     assert "Generated on-device" in markdown
+
+
+def test_llm_notes_omit_conversational_regex_terms() -> None:
+    noisy_lecture = [
+        TranscriptLine("The slope of a horizontal line is zero.", 0.0, 4.0),
+        TranscriptLine("point is x2 y2, the slope of the line is going to be y2 minus y1 divided by x2 minus x1.", 5.0, 10.0),
+        TranscriptLine("But you can also say that the x-intercept is the point negative 3 comma 0.", 11.0, 16.0),
+        TranscriptLine("Point-slope form is used when we know the slope and one point on the line.", 17.0, 22.0),
+    ]
+    llm_reply = """SUMMARY: The lecture covers horizontal slope, the slope formula, and point-slope form.
+POINTS:
+- The slope of a horizontal line is zero.
+- The slope of a line is $m = \\frac{y_2 - y_1}{x_2 - x_1}$.
+- Point-slope form uses the slope and one point on the line.
+TERMS:
+- Point-slope form: Equation using the slope and a single point on a line.
+- point: point is x2 y2, going to be y2 minus y1.
+- say x-intercept: But you can also say that the x-intercept is the point negative 3 comma 0.
+"""
+    result = NotesGenerator(FakeLlm(reply=llm_reply), LlmSettings()).generate(noisy_lecture, title="Slope")
+    terms = [d.term.lower() for d in result.definitions]
+    assert "point-slope form" in terms
+    assert "point" not in terms
+    assert "say x-intercept" not in terms
+    assert any("frac{y_2 - y_1}" in p.text for p in result.points)

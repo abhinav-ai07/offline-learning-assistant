@@ -1,14 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import { getStudentSubjectsTree } from "../../../api";
+import { subscribeRealtime } from "../../../realtime";
 import { messageOf } from "../../../format";
+<<<<<<< HEAD
 import type { AuthUser, SubjectTree } from "../../../types";
 import { BookIcon, CalendarIcon, CheckCircleIcon, FileTextIcon, WarningIcon } from "../../../components/icons";
+=======
+import type { AuthUser, LessonSummary, SubjectTree } from "../../../types";
+import {
+  BookIcon,
+  CheckCircleIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FileTextIcon,
+  FolderIcon,
+  LayersIcon,
+  MicIcon,
+  WarningIcon,
+} from "../../../components/icons";
+>>>>>>> origin/main
 
 interface MySubjectsProps {
   user: AuthUser;
   onSelectLesson: (lessonId: string) => void;
+  onNavigateTranscribe?: () => void;
 }
 
+<<<<<<< HEAD
 function SubjectIcon({ name }: { name: string }) {
   const subject = name.toLowerCase();
   if (subject.includes("math")) {
@@ -24,6 +42,9 @@ function SubjectIcon({ name }: { name: string }) {
 }
 
 export function MySubjects({ user, onSelectLesson }: MySubjectsProps) {
+=======
+export function MySubjects({ user, onSelectLesson, onNavigateTranscribe }: MySubjectsProps) {
+>>>>>>> origin/main
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [subjectsTree, setSubjectsTree] = useState<SubjectTree[]>([]);
@@ -32,6 +53,7 @@ export function MySubjects({ user, onSelectLesson }: MySubjectsProps) {
 
   useEffect(() => {
     let isMounted = true;
+<<<<<<< HEAD
     getStudentSubjectsTree()
       .then((tree) => {
         if (!isMounted) return;
@@ -46,8 +68,38 @@ export function MySubjects({ user, onSelectLesson }: MySubjectsProps) {
       .finally(() => {
         if (isMounted) setLoading(false);
       });
+=======
+    const loadTree = (silent = false) => {
+      if (!silent) setLoading(true);
+      getStudentSubjectsTree()
+        .then((tree) => {
+          if (isMounted) {
+            setSubjectsTree(tree);
+            if (!silent && tree.length > 0 && !selectedSubject) {
+              setSelectedSubject(tree[0].subject_code);
+              if (tree[0].chapters.length > 0) {
+                setExpandedChapters({ [tree[0].chapters[0].chapter_number]: true });
+              }
+            }
+            setError(null);
+          }
+        })
+        .catch((err) => {
+          if (isMounted && !silent) setError(messageOf(err));
+        })
+        .finally(() => {
+          if (isMounted && !silent) setLoading(false);
+        });
+    };
+    loadTree(false);
+    const unsub = subscribeRealtime(
+      ["lesson_published", "lesson_updated", "lesson_archived", "student_lesson_created", "student_activity"],
+      () => loadTree(true),
+    );
+>>>>>>> origin/main
     return () => {
       isMounted = false;
+      unsub();
     };
   }, []);
 
@@ -72,10 +124,27 @@ export function MySubjects({ user, onSelectLesson }: MySubjectsProps) {
 
   return (
     <div className="my-subjects-container">
+<<<<<<< HEAD
       <header className="subjects-header-banner">
         <h1>My Subjects</h1>
         <p>Browse your enrolled subjects and access recently published lectures.</p>
       </header>
+=======
+      {/* Top Banner */}
+      <div className="subjects-header-banner">
+        <div>
+          <h2>My Subjects &amp; Classroom Lectures</h2>
+          <p className="header-subtitle">
+            Class {user.class_level}{user.section || "A"} · Academic Hierarchy: Class &rarr; Section &rarr; Subject &rarr; Chapter &rarr; Daily Lesson
+          </p>
+        </div>
+        {onNavigateTranscribe && (
+          <button type="button" className="btn btn-primary btn-sm" onClick={onNavigateTranscribe}>
+            <MicIcon width={14} height={14} /> Generate Notes from Audio
+          </button>
+        )}
+      </div>
+>>>>>>> origin/main
 
       <div className="subject-selector-strip" role="tablist" aria-label="Subjects">
         {subjectsTree.map((subject) => (
@@ -135,6 +204,91 @@ export function MySubjects({ user, onSelectLesson }: MySubjectsProps) {
                       <span><span className="student-meta-person">♙</span>Teacher: {lesson.teacher_name || "Faculty"}</span>
                       <span>{chapterTitle}</span>
                     </div>
+<<<<<<< HEAD
+=======
+
+                    {isExpanded && (
+                      <div className="chapter-lessons-container">
+                        {chapter.lessons.length === 0 ? (
+                          <div className="no-lessons-in-chapter">
+                            <p>No classroom lessons have been published for this chapter yet.</p>
+                          </div>
+                        ) : (
+                          <div className="lessons-table-wrapper">
+                            <table className="lessons-table">
+                              <thead>
+                                <tr>
+                                  <th>Lesson Title</th>
+                                  <th>Teaching Date</th>
+                                  <th>Faculty</th>
+                                  <th>Status</th>
+                                  <th>Study Status</th>
+                                  <th>Action</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {chapter.lessons.map((lesson) => (
+                                  <tr key={lesson.id} className="lesson-row">
+                                    <td className="lesson-name-cell">
+                                      <div className="lesson-name-title">{lesson.title}</div>
+                                      <div className="lesson-sub-info">
+                                        {lesson.is_student_generated || lesson.status === "student_private"
+                                          ? `Added on ${lesson.teaching_date} (Self-Study)`
+                                          : `Published on ${lesson.published_at ? new Date(lesson.published_at).toLocaleDateString() : lesson.teaching_date}`}
+                                      </div>
+                                    </td>
+                                    <td className="lesson-date-cell">{lesson.teaching_date}</td>
+                                    <td className="lesson-teacher-cell">
+                                      {lesson.is_student_generated || lesson.status === "student_private"
+                                        ? "You (Self-Study)"
+                                        : (lesson.teacher_name || "Faculty")}
+                                    </td>
+                                    <td>
+                                      <div className="material-badges-row">
+                                        {(lesson.is_student_generated || lesson.status === "student_private") && (
+                                          <span className="badge-micro badge-self-study" title="Auto-sorted self-study audio notes">
+                                            Self-Study
+                                          </span>
+                                        )}
+                                        {lesson.has_transcript && (
+                                          <span className="badge-micro badge-transcript" title="Classroom transcript available">
+                                            Transcript
+                                          </span>
+                                        )}
+                                        {lesson.has_notes && (
+                                          <span className="badge-micro badge-notes" title="Generated notes available">
+                                            Notes
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td>
+                                      {lesson.completed ? (
+                                        <span className="study-status studied">
+                                          <CheckCircleIcon width={13} height={13} /> Studied
+                                        </span>
+                                      ) : (
+                                        <span className="study-status pending">Pending</span>
+                                      )}
+                                    </td>
+                                    <td>
+                                      <button
+                                        type="button"
+                                        className="btn btn-outline btn-sm"
+                                        onClick={() => onSelectLesson(lesson.id)}
+                                      >
+                                        Open Lesson
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
+>>>>>>> origin/main
                   </div>
                   <div className="student-subject-lecture-actions">
                     {lesson.has_transcript && <button type="button" className="btn btn-outline btn-sm" onClick={() => onSelectLesson(lesson.id)}><FileTextIcon width={16} height={16} />Transcript</button>}

@@ -7,6 +7,7 @@ have to care where the audio came from.
 from __future__ import annotations
 
 import logging
+import queue
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -159,6 +160,38 @@ class MicrophoneSource:
                 self._stream.stop()
             except Exception:  # pragma: no cover - best effort shutdown
                 logger.debug("failed to stop microphone stream", exc_info=True)
+
+
+class QueueAudioSource:
+    """Streams mono float32 PCM blocks pushed from a browser WebSocket."""
+
+    def __init__(self, *, sample_rate: int = 16_000) -> None:
+        self.sample_rate = sample_rate
+        self._queue: queue.Queue[np.ndarray | None] = queue.Queue()
+        self._closed = False
+
+    def push(self, pcm_bytes: bytes) -> None:
+        if self._closed or not pcm_bytes:
+            return
+        usable = len(pcm_bytes) - (len(pcm_bytes) % 4)
+        if usable <= 0:
+            return
+        samples = np.frombuffer(pcm_bytes[:usable], dtype=np.float32).copy()
+        if samples.size:
+            self._queue.put(samples)
+
+    def blocks(self) -> Iterator[np.ndarray]:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                break
+            if item.size:
+                yield item
+
+    def close(self) -> None:
+        if not self._closed:
+            self._closed = True
+            self._queue.put(None)
 
 
 def list_input_devices() -> list[dict[str, object]]:

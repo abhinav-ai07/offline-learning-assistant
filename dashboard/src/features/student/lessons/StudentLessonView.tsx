@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   getStudentLessonDetail,
   markLessonComplete,
   recordLessonActivity,
 } from "../../../api";
+import { MathMarkdown } from "../../../shared/components/MathMarkdown";
 import { messageOf } from "../../../format";
 import type { LessonDetail } from "../../../types";
 import {
@@ -191,7 +190,11 @@ export function StudentLessonView({
       {/* Lesson Header Banner */}
       <div className="lesson-hero-card">
         <div className="hero-kicker">
-          <span className="badge badge-published">Published Lesson</span>
+          {lesson.is_student_generated || lesson.status === "student_private" ? (
+            <span className="badge badge-self-study">Self-Study Audio</span>
+          ) : (
+            <span className="badge badge-published">Published Lesson</span>
+          )}
           <span>Class {lesson.class_level}{lesson.section}</span>
           <span>·</span>
           <span>{lesson.subject.toUpperCase()}</span>
@@ -200,7 +203,11 @@ export function StudentLessonView({
         </div>
         <h2 className="lesson-main-title">{lesson.title}</h2>
         <div className="hero-meta-row">
-          <span>Faculty: <strong>{lesson.teacher_name || "Classroom Teacher"}</strong></span>
+          <span>
+            {lesson.is_student_generated || lesson.status === "student_private"
+              ? <>Source: <strong>Self-Study Recording</strong></>
+              : <>Faculty: <strong>{lesson.teacher_name || "Classroom Teacher"}</strong></>}
+          </span>
           <span>·</span>
           <span>Teaching Date: {lesson.teaching_date}</span>
           <span>·</span>
@@ -285,7 +292,11 @@ export function StudentLessonView({
             </div>
             <div className="detail-item">
               <span className="detail-label">Conducted By</span>
-              <span className="detail-value">{lesson.teacher_name || "Faculty"}</span>
+              <span className="detail-value">
+                {lesson.is_student_generated || lesson.status === "student_private"
+                  ? "You (Self-Study)"
+                  : (lesson.teacher_name || "Faculty")}
+              </span>
             </div>
             <div className="detail-item">
               <span className="detail-label">Classroom Date</span>
@@ -398,11 +409,9 @@ export function StudentLessonView({
             </div>
           </div>
 
-          <div className="notes-rendered-content markdown-body">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {lesson.notes_markdown || "_No notes generated for this lesson._"}
-            </ReactMarkdown>
-          </div>
+          <MathMarkdown className="notes-rendered-content markdown-body">
+            {lesson.notes_markdown || "_No notes generated for this lesson._"}
+          </MathMarkdown>
         </div>
       )}
 

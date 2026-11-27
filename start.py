@@ -120,9 +120,66 @@ def _wait_for_ila(max_wait: float = 30.0, interval: float = 0.5) -> bool:
 # Main
 # ---------------------------------------------------------------------------
 
+def _resolve_ila_home() -> Path:
+    """Keep existing user data/models in ~/.ila if present; otherwise use repo-local .ila."""
+    existing_env = os.environ.get("ILA_HOME")
+    if existing_env:
+        return Path(existing_env).expanduser()
+    user_ila = Path.home() / ".ila"
+    if (user_ila / "data" / "ila.sqlite3").is_file():
+        return user_ila
+    return ROOT / ".ila"
+
+
+def _dashboard_needs_build() -> bool:
+    """Return True if dashboard/dist is missing or older than dashboard/src."""
+    if not DASHBOARD_DIST.is_file():
+        return True
+    src_dir = ROOT / "dashboard" / "src"
+    if not (ROOT / "dashboard" / "node_modules").is_dir() or not src_dir.is_dir():
+        return False
+    dist_mtime = DASHBOARD_DIST.stat().st_mtime
+    for candidate in [ROOT / "dashboard" / "index.html", *src_dir.rglob("*")]:
+        if candidate.is_file() and candidate.stat().st_mtime > dist_mtime:
+            return True
+    return False
+
+
+def _served_index_matches_dist(timeout: float = 2.0) -> bool:
+    """Check whether the running ILA server is already serving our current dashboard/dist."""
+    if not DASHBOARD_DIST.is_file():
+        return True
+    try:
+        dist_html = DASHBOARD_DIST.read_text(encoding="utf-8")
+        import re
+        match = re.search(r'/assets/(index-[A-Za-z0-9_-]+\.js)', dist_html)
+        if not match:
+            return True
+        expected_asset = match.group(1)
+        with urllib.request.urlopen(f"{URL}/", timeout=timeout) as resp:
+            live_html = resp.read().decode("utf-8", errors="ignore")
+        return expected_asset in live_html
+    except Exception:
+        return False
+
+
+def _stop_pid_tree(pid: int) -> None:
+    """Terminate an older ILA server process tree cleanly so the updated build can bind PORT."""
+    try:
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
 def main() -> None:
     os.chdir(ROOT)
-    os.environ["ILA_HOME"] = str(ROOT / ".ila")
+    ila_home = _resolve_ila_home()
+    os.environ["ILA_HOME"] = str(ila_home)
 
     if "--create-admin" in sys.argv:
         from ila.cli import create_admin
@@ -130,41 +187,11 @@ def main() -> None:
         return
 
     print(BANNER)
+    print(f"[i] Data & models directory: {ila_home}\n")
 
-    # 1. Check if the port is already occupied --------------------------------
-    if _port_in_use():
-        print(f"[i] Port {PORT} is already in use.")
-
-        if _ila_health_check():
-            print(f"[✓] An ILA server is already running and healthy at {URL}")
-            print("    Opening browser...")
-            webbrowser.open(URL)
-            print("\n    To stop the existing server, press Ctrl+C in its terminal window.")
-            return
-
-        # Port occupied by something else
-        pid = _pid_on_port()
-        pid_msg = f" (PID {pid})" if pid else ""
-        print(f"\n[✗] ERROR: Port {PORT} is occupied by another process{pid_msg}.")
-        print(    "    The listener did not pass the Administration Portal readiness check.")
-        print(    "\n    Options:")
-        if pid:
-            print(f"      • If this is an older ILA server, stop its terminal with Ctrl+C and restart this launcher.")
-        print(    "      • Use a different port by editing HOST/PORT in start.py.")
-        print(    "      • Restart your computer if the process is a stale socket.\n")
-        sys.exit(1)
-
-    if sys.stdin.isatty():
-        from ila.storage import Storage
-        school = Storage(ROOT / ".ila" / "data" / "ila.sqlite3")
-        if not school.count_users("admin"):
-            from ila.cli import create_admin
-            print("First launch: create the school administrator account.")
-            create_admin()
-
-    # 2. Build dashboard dist if missing --------------------------------------
-    if not DASHBOARD_DIST.is_file():
-        print("[*] Dashboard build not detected. Building dashboard (npm run build)...")
+    # 1. Build/refresh dashboard dist if missing or out-of-date ---------------
+    if _dashboard_needs_build():
+        print("[*] Building dashboard (npm run build)...")
         dashboard_dir = ROOT / "dashboard"
         try:
             subprocess.run(
@@ -180,17 +207,58 @@ def main() -> None:
                 "    Run  cd dashboard && npm run build  manually if the UI looks broken."
             )
 
+    # 2. Check if the port is already occupied --------------------------------
+    if _port_in_use():
+        print(f"[i] Port {PORT} is already in use.")
+
+        if _ila_health_check():
+            if _served_index_matches_dist():
+                print(f"[✓] Up-to-date ILA server is already running at {URL}")
+                print("    Opening browser...")
+                webbrowser.open(URL)
+                print("\n    To stop the existing server, press Ctrl+C in its terminal window.")
+                return
+            pid = _pid_on_port()
+            if pid:
+                print(f"[*] Replacing older ILA server (PID {pid}) with updated build...")
+                _stop_pid_tree(pid)
+                for _ in range(20):
+                    if not _port_in_use():
+                        break
+                    time.sleep(0.25)
+
+        if _port_in_use():
+            # Port occupied by something else
+            pid = _pid_on_port()
+            pid_msg = f" (PID {pid})" if pid else ""
+            print(f"\n[✗] ERROR: Port {PORT} is occupied by another process{pid_msg}.")
+            print(    "    The listener did not pass the Administration Portal readiness check.")
+            print(    "\n    Options:")
+            if pid:
+                print(f"      • If this is an older ILA server, stop its terminal with Ctrl+C and restart this launcher.")
+            print(    "      • Use a different port by editing HOST/PORT in start.py.")
+            print(    "      • Restart your computer if the process is a stale socket.\n")
+            sys.exit(1)
+
+    if sys.stdin.isatty():
+        from ila.storage import Storage
+        school = Storage(ila_home / "data" / "ila.sqlite3")
+        if not school.count_users("admin"):
+            from ila.cli import create_admin
+            print("First launch: create the school administrator account.")
+            create_admin()
+
     # 3. Determine Python executable ------------------------------------------
     python_exe = sys.executable
     venv_python = ROOT / ".venv" / "Scripts" / "python.exe"
     if venv_python.is_file():
         python_exe = str(venv_python)
 
-    print(f"[*] Starting ILA server on {HOST}:{PORT} ...")
+    print(f"[*] Starting ILA server on {HOST}:{PORT} (with live code reload & real-time sync)...")
     print("    Press Ctrl+C to stop.\n")
 
     # 4. Launch uvicorn in a subprocess so we can monitor it ------------------
-    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    env = {**os.environ, "PYTHONUNBUFFERED": "1", "ILA_HOME": str(ila_home)}
     try:
         server_proc = subprocess.Popen(
             [
@@ -198,6 +266,8 @@ def main() -> None:
                 "ila.server:app",
                 "--host", HOST,
                 "--port", str(PORT),
+                "--reload",
+                "--reload-dir", "src",
                 "--log-level", "info",
             ],
             env=env,

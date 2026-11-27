@@ -186,6 +186,17 @@ export interface TranscribeResponse {
   notes_error: string | null;
 }
 
+export interface StudentTranscribeResponse extends TranscribeResponse {
+  lesson_id: string;
+  title: string;
+  subject: string;
+  subject_label: string;
+  chapter_number: number;
+  chapter_title: string;
+  correlation_score: number;
+  matched_terms: string[];
+}
+
 export interface CaptionLine {
   id: number;
   text: string;
@@ -479,7 +490,7 @@ export interface TeacherOverview {
 }
 
 export interface TeacherStudentDetail {
-  lesson_history?: {id:number; lesson_title:string;event_type:string;created_at:string}[];
+  lesson_history?: { id: number; lesson_title: string; event_type: string; created_at: string }[];
   student_id: string;
   student?: {
     id: string;
@@ -585,7 +596,7 @@ export interface TimetableSlot {
   time_slot: string;
 }
 
-export type LessonStatus = "draft" | "processing" | "ready_for_review" | "published" | "archived";
+export type LessonStatus = "draft" | "processing" | "ready_for_review" | "published" | "archived" | "student_private";
 
 export interface KeyConcept {
   title: string;
@@ -611,6 +622,7 @@ export interface LessonSummary {
   teacher_name?: string;
   teaching_date: string;
   status: LessonStatus;
+  is_student_generated?: boolean;
   published_at?: string | null;
   duration_s?: number;
   has_transcript?: boolean;

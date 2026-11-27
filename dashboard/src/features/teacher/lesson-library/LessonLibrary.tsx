@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { archiveTeacherLesson, getTeacherLessons, publishTeacherLesson } from "../../../api";
+import { subscribeRealtime } from "../../../realtime";
 import { messageOf } from "../../../format";
 import type { AuthUser, LessonSummary } from "../../../types";
 import {
@@ -32,8 +33,8 @@ export function LessonLibrary({ user, onOpenLesson, onEditInStudio }: LessonLibr
   const [subjectFilter, setSubjectFilter] = useState<string>("all");
   const [classFilter, setClassFilter] = useState<number | undefined>(undefined);
 
-  const fetchLessons = () => {
-    setLoading(true);
+  const fetchLessons = (silent = false) => {
+    if (!silent) setLoading(true);
     getTeacherLessons({
       classLevel: classFilter,
       subject: subjectFilter === "all" ? undefined : subjectFilter,
@@ -45,15 +46,19 @@ export function LessonLibrary({ user, onOpenLesson, onEditInStudio }: LessonLibr
         setError(null);
       })
       .catch((err) => {
-        setError(messageOf(err));
+        if (!silent) setError(messageOf(err));
       })
       .finally(() => {
-        setLoading(false);
+        if (!silent) setLoading(false);
       });
   };
 
   useEffect(() => {
-    fetchLessons();
+    fetchLessons(false);
+    return subscribeRealtime(
+      ["lesson_published", "lesson_updated", "lesson_archived"],
+      () => fetchLessons(true),
+    );
   }, [statusFilter, subjectFilter, classFilter]);
 
   useEffect(() => {

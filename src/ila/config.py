@@ -97,10 +97,11 @@ class AsrSettings(BaseModel):
     """faster-whisper (CTranslate2 Whisper) configuration."""
 
     model: str = "base.en"
-    device: Literal["auto", "cpu", "cuda"] = "auto"
+    device: Literal["auto", "cpu", "cuda"] = "cpu"
     compute_type: str = "int8"
     cpu_threads: int = 0
     beam_size: int = 5
+    batch_size: int = 8
     #: ``None`` lets Whisper auto-detect the language (slower, multilingual).
     language: str | None = "en"
     #: Drop segments that are both likely non-speech and low confidence.
