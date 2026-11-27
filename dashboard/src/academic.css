@@ -1209,11 +1209,11 @@ html,body,#root {height:auto;min-height:100%;overflow:visible}
 .mini-calendar-footer button {flex:0 0 auto;padding:4px 7px;border:0;border-radius:5px;background:var(--accent-subtle);color:var(--accent-text);font:650 .67rem system-ui,sans-serif;cursor:pointer}
 .mini-calendar-footer button:hover {filter:brightness(.96)}
 .mini-calendar-error {display:block;margin-top:5px;color:var(--danger-text);font-size:.66rem}
-[data-portal="student"] .student-welcome-banner {display:grid;grid-template-columns:minmax(0,560px) 292px;justify-content:start;align-items:center;gap:32px}
+[data-portal="student"] .student-welcome-banner {display:grid;grid-template-columns:minmax(0,1fr) 292px;align-items:center;gap:32px}
 [data-portal="student"] .student-welcome-banner:after {display:none}
 [data-portal="student"] .student-overview-illustration {display:none}
 [data-portal="student"] .welcome-content {position:relative;z-index:1;min-width:0}
-.teacher-dashboard-heading {display:grid;grid-template-columns:minmax(0,560px) 292px;justify-content:start;align-items:center;gap:32px}
+.teacher-dashboard-heading {display:grid;grid-template-columns:minmax(0,1fr) 292px;align-items:center;gap:32px}
 .teacher-dashboard-heading>div:first-child .btn {margin-top:16px}
 .teacher-overview-heading-actions {justify-content:flex-start;align-items:center}
 @media(max-width:900px) {
