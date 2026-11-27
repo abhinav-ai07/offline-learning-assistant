@@ -49,6 +49,9 @@ def default_data_dir() -> Path:
 
 
 def default_llm_dir() -> Path:
+    bundled = Path(__file__).resolve().parents[2] / ".ila/models/llm"
+    if not os.environ.get("ILA_HOME") and (bundled / "Qwen3.5-2B-Q4_K_M.gguf").is_file():
+        return bundled
     local_dir = Path("models") / "llm"
     if local_dir.is_dir() and any(local_dir.glob("*.gguf")):
         return local_dir.resolve()
@@ -109,7 +112,7 @@ class AsrSettings(BaseModel):
     logprob_threshold: float = -1.0
     model_dir: Path = Field(default_factory=default_model_dir)
     #: Set to true once models are downloaded for a fully offline deployment.
-    local_files_only: bool = False
+    local_files_only: bool = True
 
 
 class LlmSettings(BaseModel):

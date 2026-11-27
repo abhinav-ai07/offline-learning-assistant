@@ -1,7 +1,9 @@
 import { useEffect, useState, type DragEvent, type ChangeEvent } from "react";
-import { getClassSubjects } from "../../../api";
+import { getClassSubjects, studentTranscribeFile } from "../../../api";
 import { messageOf } from "../../../format";
-import type { AuthUser } from "../../../types";
+import { classroomImages } from "../../../shared/classroomImages";
+import { MathMarkdown } from "../../../shared/components/MathMarkdown";
+import type { AuthUser, StudentTranscribeResponse } from "../../../types";
 import { CpuIcon, ImageIcon, MicIcon, UploadIcon } from "../../../components/icons";
 
 interface StudentStudyBuilderProps {
@@ -16,6 +18,9 @@ export function StudentStudyBuilder({ user }: StudentStudyBuilderProps) {
   const [topic, setTopic] = useState("");
   const [mode, setMode] = useState<UploadMode>("audio");
   const [file, setFile] = useState<File | null>(null);
+  const [images, setImages] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<StudentTranscribeResponse | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,38 +40,61 @@ export function StudentStudyBuilder({ user }: StudentStudyBuilderProps) {
     };
   }, [user.class_level]);
 
-  const acceptFile = (candidate?: File) => {
-    if (!candidate) return;
-    const extension = candidate.name.split(".").pop()?.toLowerCase() || "";
-    const valid = mode === "audio"
-      ? ["wav", "mp3", "m4a"].includes(extension)
-      : ["jpg", "jpeg", "png"].includes(extension);
-    if (!valid) {
-      setFile(null);
-      setError(mode === "audio"
-        ? "Choose an audio file in WAV, MP3, or M4A format."
-        : "Choose an image in JPG, JPEG, or PNG format.");
-      return;
+  const acceptFiles = (files: File[]) => {
+    if (busy || !files.length) return;
+    if (mode === "audio") {
+      if (files.length !== 1 || !/\.(wav|mp3|m4a)$/i.test(files[0].name)) {
+        setError("Choose one WAV, MP3, or M4A recording.");
+        return;
+      }
+      setFile(files[0]);
+    } else {
+      if (files.some(image => !/\.(jpg|jpeg|png)$/i.test(image.name))) {
+        setError("Choose JPG, JPEG, or PNG images.");
+        return;
+      }
+      if (images.length + files.length > 6) {
+        setError("Choose up to six classroom images per recording.");
+        return;
+      }
+      setImages([...images, ...files]);
     }
     setError(null);
-    setFile(candidate);
   };
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    acceptFile(event.currentTarget.files?.[0]);
+    acceptFiles(Array.from(event.currentTarget.files || []));
     event.currentTarget.value = "";
   };
 
   const onDrop = (event: DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
     setDragging(false);
-    acceptFile(event.dataTransfer.files[0]);
+    acceptFiles(Array.from(event.dataTransfer.files));
   };
 
-  const changeMode = (nextMode: UploadMode) => {
-    setMode(nextMode);
-    setFile(null);
+  const generate = async () => {
+    if (!file || busy) return;
+    setBusy(true);
     setError(null);
+    setResult(null);
+    try {
+      const response = await studentTranscribeFile(file, {
+        subject: subject === "all" ? "auto" : subject,
+        title: topic.trim() || undefined,
+        profile: "balanced",
+        useLlm: true,
+        images: await classroomImages(images),
+      });
+      setResult(response);
+      if (response.notes_error || !response.notes?.used_llm || !response.markdown) {
+        setError(response.notes_error || response.notes?.fallback_reason || "Qwen did not produce study notes.");
+      }
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -74,7 +102,7 @@ export function StudentStudyBuilder({ user }: StudentStudyBuilderProps) {
       <header className="student-page-heading builder-page-heading">
         <div>
           <h1><CpuIcon width={26} height={26} /> Smart Study Builder</h1>
-          <p>Turn your lecture material into structured, chapter-wise study content. Upload a lecture or revision recording (audio/image) to begin.</p>
+          <p>Turn your lecture material into structured, chapter-wise study content. Upload a recording and optionally add up to six classroom images.</p>
         </div>
         <svg className="builder-illustration" viewBox="0 0 390 150" aria-hidden="true">
           <path d="M8 116c48-35 88-26 133-3 44 22 88 12 129-16 42-29 77-28 120-7v60H8z" fill="#e1f3e7"/>
@@ -103,23 +131,23 @@ export function StudentStudyBuilder({ user }: StudentStudyBuilderProps) {
         <div className="builder-topic-fields">
           <label>
             Subject
-            <select value={subject} onChange={(event) => setSubject(event.target.value)}>
+            <select disabled={busy} value={subject} onChange={(event) => setSubject(event.target.value)}>
               <option value="all">Auto-detect across all Class {user.class_level} subjects</option>
               {subjects.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}
             </select>
           </label>
           <label>
             Chapter / Topic (Optional)
-            <input value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="Auto-named from content if left blank"/>
+            <input disabled={busy} value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="Auto-named from content if left blank"/>
           </label>
         </div>
 
         <div className="builder-upload-modes" role="group" aria-label="Upload type">
-          <button type="button" className={mode === "audio" ? "active" : ""} aria-pressed={mode === "audio"} onClick={() => changeMode("audio")}>
+          <button type="button" className={mode === "audio" ? "active" : ""} aria-pressed={mode === "audio"} disabled={busy} onClick={() => setMode("audio")}>
             <MicIcon width={22} height={22}/>
             <span><strong>Upload Audio</strong><small>(.wav, .mp3, .m4a)</small></span>
           </button>
-          <button type="button" className={mode === "image" ? "active" : ""} aria-pressed={mode === "image"} onClick={() => changeMode("image")}>
+          <button type="button" className={mode === "image" ? "active" : ""} aria-pressed={mode === "image"} disabled={busy} onClick={() => setMode("image")}>
             <ImageIcon width={22} height={22}/>
             <span><strong>Upload Image</strong><small>(.jpg, .png, .jpeg)</small></span>
           </button>
@@ -131,16 +159,34 @@ export function StudentStudyBuilder({ user }: StudentStudyBuilderProps) {
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
         >
-          <input type="file" accept={mode === "audio" ? ".wav,.mp3,.m4a,audio/wav,audio/mpeg,audio/mp4" : ".jpg,.jpeg,.png,image/jpeg,image/png"} onChange={onFileChange}/>
+          <input type="file" disabled={busy} multiple={mode === "image"} accept={mode === "audio" ? ".wav,.mp3,.m4a,audio/wav,audio/mpeg,audio/mp4" : ".jpg,.jpeg,.png,image/jpeg,image/png"} onChange={onFileChange}/>
           <UploadIcon width={34} height={34}/>
           <strong>Drag &amp; drop your file here</strong>
           <span>or</span>
           <span className="builder-browse-button">Browse Files</span>
-          {file && <span className="builder-selected-file"><strong>{file.name}</strong> · {Math.ceil(file.size / 1024)} KB</span>}
+
         </label>
+        {file && <p className="builder-selected-file">Recording · {file.name}</p>}
+        {images.length > 0 && <ul>{images.map((image, index) => (
+          <li key={index}>{image.name}{" "}
+            <button type="button" className="btn btn-outline btn-sm" disabled={busy}
+              aria-label={`Remove ${image.name}`} onClick={() => setImages(images.filter((_, i) => i !== index))}>
+              Remove
+            </button>
+          </li>
+        ))}</ul>}
         {error && <p className="builder-upload-message" role="alert">{error}</p>}
-        {file && <p className="builder-upload-message" role="status">File selected locally. Student file processing is not available yet.</p>}
+        <button type="button" className="btn btn-primary" disabled={!file || busy} onClick={generate}>
+          Generate study notes
+        </button>
+        {busy && <p className="builder-upload-message" role="status">Processing your recording and generating notes locally…</p>}
       </section>
+      {result && <section className="builder-input-card" aria-label="Study results">
+        <h2>{result.title}</h2>
+        <p>{result.subject_label} · {result.chapter_title}</p>
+        {result.notes?.used_llm && result.markdown && <MathMarkdown>{result.markdown}</MathMarkdown>}
+        <details><summary>View transcript</summary><p>{result.transcript}</p></details>
+      </section>}
     </div>
   );
 }

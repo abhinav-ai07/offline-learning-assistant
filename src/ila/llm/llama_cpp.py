@@ -70,7 +70,9 @@ class LlamaCppProvider:
     @property
     def available(self) -> bool:
         path = self.path
-        if not llama_cpp_installed() or not path.is_file():
+        from ila.classroom import BINARY
+
+        if not (BINARY.is_file() or llama_cpp_installed()) or not path.is_file():
             return False
         size = path.stat().st_size
         expected = self.expected_bytes
@@ -147,8 +149,17 @@ class LlamaCppProvider:
         temperature: float = 0.2,
         stop: Sequence[str] | None = None,
     ) -> str:
-        model = self._ensure_loaded()
+        from ila.classroom import BINARY, local_model
+
         stops = list(stop) if stop else list(_STOP)
+        if BINARY.is_file():
+            if not self.available:
+                raise RuntimeError(f"Missing or incomplete local model at {self.path}")
+            with local_model(self.path.parent, False, self.path) as complete:
+                return complete(
+                    None, max_tokens, messages=list(messages), temperature=temperature, stop=stops
+                )
+        model = self._ensure_loaded()
 
         try:
             result: dict[str, Any] = model.create_chat_completion(

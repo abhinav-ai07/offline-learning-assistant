@@ -259,6 +259,11 @@ def main() -> None:
 
     # 4. Launch uvicorn in a subprocess so we can monitor it ------------------
     env = {**os.environ, "PYTHONUNBUFFERED": "1", "ILA_HOME": str(ila_home)}
+    bundled_models = ROOT / ".ila" / "models"
+    if (bundled_models / "models--Systran--faster-whisper-base.en").is_dir():
+        env.setdefault("ILA_ASR__MODEL_DIR", str(bundled_models))
+    if (bundled_models / "llm").is_dir():
+        env.setdefault("ILA_LLM__MODEL_DIR", str(bundled_models / "llm"))
     try:
         server_proc = subprocess.Popen(
             [

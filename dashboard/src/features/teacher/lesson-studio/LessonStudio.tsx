@@ -1,3 +1,4 @@
+import { classroomImages, imageBase64 } from "../../../shared/classroomImages";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -73,6 +74,7 @@ export function LessonStudio({
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
 
   // Step 4: Notes State
+  const [images, setImages] = useState<File[]>([]);
   const [generatingNotes, setGeneratingNotes] = useState(false);
   const [notesMarkdown, setNotesMarkdown] = useState("");
   const [notesResult, setNotesResult] = useState<any>(null);
@@ -200,23 +202,19 @@ export function LessonStudio({
     setGeneratingNotes(true);
     setNotesError(null);
     try {
-      let lines = transcriptLines;
-      if (!lines || lines.length === 0) {
-        lines = transcript.split(/(?<=[.?!])\s+/).map((sentence, idx) => ({
-          text: sentence,
-          start: idx * 4,
-          end: (idx + 1) * 4,
-        }));
-      }
-
+      const encoded = await Promise.all((await classroomImages(images)).map(imageBase64));
       const resp = await createNotes({
-        lines,
+        lines: transcriptLines,
+        text: transcript,
+        images: encoded,
+        image_observations: encoded.length ? [] : notesResult?.image_observations,
         title: lessonTitle,
         class_level: classLevel,
         subject,
         profile: "auto",
         use_llm: true,
         use_syllabus: true,
+        require_syllabus_match: false,
       });
 
       setNotesMarkdown(resp.markdown);
@@ -543,6 +541,10 @@ export function LessonStudio({
             </button>
           </div>
 
+          <label>Classroom images (optional, up to six)
+            <input type="file" accept="image/png,image/jpeg,image/webp" multiple
+              onChange={event => setImages(Array.from(event.target.files || []))} />
+          </label>
           <div className="transcript-editor-box">
             <textarea
               className="form-textarea transcript-textarea"

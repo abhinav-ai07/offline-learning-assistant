@@ -386,6 +386,7 @@ class NoteResult:
     model: str | None = None
     dropped: int = 0
     latency_s: float = 0.0
+    image_observations: list[str] = field(default_factory=list)
     fallback_reason: str | None = None
     sentences: int = 0
     #: Serialized :class:`ila.curriculum.SyllabusContext`, when requested.
@@ -404,6 +405,7 @@ class NoteResult:
             "dropped": self.dropped,
             "latency_s": round(self.latency_s, 2),
             "fallback_reason": self.fallback_reason,
+            "image_observations": self.image_observations,
             "sentences": self.sentences,
             "curriculum": self.curriculum,
         }
@@ -864,6 +866,9 @@ def generate_notes(
 
         text = " ".join(line.text for line in lines)
         syllabus = build_syllabus_context(text, class_level, subject)
+    if settings.enabled and (profile or settings.profile) in {"auto", "balanced"} and not settings.model_path:
+        from ila.classroom import classroom_notes
+        return classroom_notes(settings, lines, title, [], syllabus)
     return NotesGenerator.from_settings(settings, profile=profile).generate(
         lines, title=title, syllabus=syllabus
     )

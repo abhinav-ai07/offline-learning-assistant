@@ -308,7 +308,10 @@ class NotesRequest(BaseModel):
     subject: str | None = None
     profile: str = "auto"
     use_llm: bool = True
+    image_observations: list[Annotated[str, Field(max_length=12000)]] = Field(default_factory=list, max_length=6)
+    images: list[Annotated[str, Field(max_length=14000000)]] = Field(default_factory=list, max_length=6)
     use_syllabus: bool = True
+    require_syllabus_match: bool = True
     budget_s: float | None = Field(default=None, gt=0, le=900)
 
 
@@ -519,6 +522,8 @@ def require_admin(user: Annotated[dict[str, Any], Depends(get_current_user)]) ->
 
 
 def _resolved_profile(settings: Settings) -> str:
+    if settings.llm.profile == "auto" and not settings.llm.model_path:
+        return "balanced"
     try:
         from ila.llm import LlamaCppProvider
         return LlamaCppProvider(settings.llm).profile
@@ -540,11 +545,16 @@ def _notes_provider_info(settings: Settings, profile: str) -> dict[str, Any]:
         and (size_bytes == expected if expected is not None else size_bytes > 0)
     )
     spec = PROFILE_MODELS[profile]
+    if profile == "balanced" and not settings.llm.model_path:
+        from ila.classroom import BINARY, PROJECTOR
+        available = settings.llm.enabled and size_bytes == spec.size_bytes and BINARY.is_file()
     return {
         "enabled": settings.llm.enabled,
         "profile": profile,
         "profile_requested": settings.llm.profile,
         "available": available,
+        **({"runtime": str(BINARY), "projector": str(path.parent / PROJECTOR)}
+           if profile == "balanced" and not settings.llm.model_path else {}),
         "model": path.name,
         "path": str(path),
         "size_mb": round(size_bytes / (1024**2), 1),
@@ -552,7 +562,7 @@ def _notes_provider_info(settings: Settings, profile: str) -> dict[str, Any]:
         "ram_gb": spec.ram_gb,
         "note": spec.note,
         "budget_s": settings.llm.budget_s,
-        "threads": provider.info.n_threads,
+        "threads": 6 if profile == "balanced" and not settings.llm.model_path else provider.info.n_threads,
         "selectable": ["auto", *PROFILE_MODELS],
     }
 
@@ -747,6 +757,8 @@ def _generate_notes_sync(
     title: str,
     profile: str | None,
     syllabus: Any,
+    images: list[str] | None = None,
+    observations: list[str] | None = None,
 ) -> NoteResult:
     resolved: str | None = None
     if settings.llm.enabled:
@@ -756,6 +768,14 @@ def _generate_notes_sync(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    if resolved == "auto" and settings.llm.profile != "auto":
+        resolved = settings.llm.profile
+    if settings.llm.enabled and resolved in {"balanced", "auto"} and not settings.llm.model_path:
+        from ila.classroom import classroom_notes
+        with NOTES_LOCK:
+            return classroom_notes(settings.llm, lines, title, images or [], syllabus, observations)
+    if images or observations:
+        raise ValueError("Classroom images require the balanced Qwen3.5 2B model")
     provider = LLM_REGISTRY.get(settings, profile=resolved)
     generator = NotesGenerator(provider, settings.llm)
     with NOTES_LOCK:
@@ -1555,7 +1575,7 @@ async def create_notes(
     if request.use_syllabus:
         syllabus = _syllabus_for(lines, class_level, subject)
         has_defined_chapters = bool(syllabus and getattr(syllabus.course, "chapters", ()))
-        if has_defined_chapters:
+        if has_defined_chapters and request.require_syllabus_match:
             if not syllabus or not getattr(syllabus, "matches", None):
                 raise HTTPException(
                     status_code=400,
@@ -1595,6 +1615,8 @@ async def create_notes(
             title=title,
             profile=None if not settings.llm.enabled else request.profile,
             syllabus=syllabus,
+            images=request.images,
+            observations=None if request.images else request.image_observations,
         )
     except HTTPException:
         raise
@@ -1697,6 +1719,25 @@ async def transcribe_upload(
                 target.unlink(missing_ok=True)
 
 
+async def _classroom_uploads(images: list[UploadFile] | None) -> list[str]:
+    import base64
+    from ila.classroom import validate_image
+    if len(images or []) > 6:
+        raise HTTPException(422, detail="Choose up to six classroom images")
+    result = []
+    for upload in images or []:
+        data = await upload.read(10_500_001)
+        if len(data) > 10_500_000:
+            raise HTTPException(413, detail="Classroom image exceeds size limit")
+        encoded = base64.b64encode(data).decode("ascii")
+        try:
+            validate_image(encoded)
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+        result.append(encoded)
+    return result
+
+
 @app.post("/api/student/transcribe")
 async def student_transcribe_upload(
     current_user: Annotated[dict[str, Any], Depends(require_student)],
@@ -1706,8 +1747,10 @@ async def student_transcribe_upload(
     use_llm: Annotated[bool, Form()] = True,
     title: Annotated[str, Form()] = "",
     lines_json: Annotated[str, Form()] = "",
+    images: Annotated[list[UploadFile] | None, File()] = None,
 ) -> dict[str, Any]:
     """Transcribe student audio only if it correlates with syllabus topics, then auto-sort into its chapter."""
+    classroom_images = await _classroom_uploads(images)
     enrollment = _store().get_student_enrollment(current_user["id"])
     class_level = int(enrollment.get("class_level") or current_user.get("class_level") or 10)
     section = str(enrollment.get("section") or current_user.get("section") or "A")
@@ -1770,6 +1813,7 @@ async def student_transcribe_upload(
                 lines,
                 title=lesson_title,
                 profile=profile if settings.llm.enabled else None,
+                images=classroom_images,
                 syllabus=syllabus_ctx,
             )
             notes_dict = note_result.to_dict()
@@ -1967,8 +2011,10 @@ async def student_transcribe_upload_stream(
     use_llm: Annotated[bool, Form()] = True,
     title: Annotated[str, Form()] = "",
     lines_json: Annotated[str, Form()] = "",
+    images: Annotated[list[UploadFile] | None, File()] = None,
 ) -> StreamingResponse:
     """Stream real-time ASR lines for a student upload, reject off-topic audio, and auto-sort into chapter."""
+    classroom_images = await _classroom_uploads(images)
     enrollment = _store().get_student_enrollment(current_user["id"])
     class_level = int(enrollment.get("class_level") or current_user.get("class_level") or 10)
     section = str(enrollment.get("section") or current_user.get("section") or "A")
@@ -2071,6 +2117,7 @@ async def student_transcribe_upload_stream(
                     lines,
                     title=lesson_title,
                     profile=profile if settings.llm.enabled else None,
+                    images=classroom_images,
                     syllabus=syllabus_ctx,
                 )
                 notes_dict = note_result.to_dict()
@@ -2923,10 +2970,14 @@ def teacher_regenerate_notes(
 
     lines = lines_from_text(transcript)
     settings = SETTINGS.model_copy(deep=True)
-    provider = LLM_REGISTRY.get(settings, profile="auto")
-    generator = NotesGenerator(provider)
     syllabus_ctx = _syllabus_for(lines, lesson["class_level"], lesson["subject"])
-    note_result = generator.generate(lines, title=lesson["title"], syllabus=syllabus_ctx)
+    try:
+        note_result = _generate_notes_sync(
+            settings, lines, title=lesson["title"], profile=settings.llm.profile,
+            syllabus=syllabus_ctx, observations=(lesson.get("notes_json") or {}).get("image_observations"),
+        )
+    except (RuntimeError, OSError, ValueError) as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
     markdown = note_result.to_markdown()
 
     _store().update_lesson(

@@ -11,6 +11,7 @@ from ila.text import clean_caption, has_content, normalize_transcript
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
+        ("Triangle \u25b3ABC", "Triangle \u25b3ABC"),
         ("  hello   world  ", "hello world"),
         ("line\nbreak\tand  tabs", "line break and tabs"),
         ("block \u2588\u2588\u2588 glyph", "block glyph"),

@@ -15,7 +15,6 @@ from ila.events import CaptionEvent
 _ARTEFACT_RANGES = (
     (0x2500, 0x257F),  # box drawing
     (0x2580, 0x259F),  # block elements
-    (0x25A0, 0x25FF),  # geometric shapes
 )
 
 

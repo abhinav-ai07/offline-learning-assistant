@@ -1,3 +1,4 @@
+import { classroomImages } from "../../../shared/classroomImages";
 import { useEffect, useState } from "react";
 import { getClassSubjects, studentTranscribeFile } from "../../../api";
 import { messageOf } from "../../../format";
@@ -32,6 +33,7 @@ export function StudentTranscriptView({
   const [selectedSubject, setSelectedSubject] = useState<string>("auto");
   const [customTitle, setCustomTitle] = useState("");
   const [audioSource, setAudioSource] = useState<"upload" | "record">("upload");
+  const [images, setImages] = useState<File[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [liveLines, setLiveLines] = useState<DemoLine[]>([]);
   const [processing, setProcessing] = useState(false);
@@ -71,6 +73,7 @@ export function StudentTranscriptView({
     setResult(null);
     try {
       const resp = await studentTranscribeFile(selectedFile, {
+        images: await classroomImages(images),
         subject: selectedSubject,
         profile: "auto",
         useLlm: true,
@@ -96,6 +99,7 @@ export function StudentTranscriptView({
   const handleReset = () => {
     setResult(null);
     setSelectedFile(null);
+    setImages([]);
     setLiveLines([]);
     setCustomTitle("");
     setError(null);
@@ -121,6 +125,10 @@ export function StudentTranscriptView({
           Choose a specific subject or let ILA auto-detect the subject and chapter from your Class {classLevel} curriculum.
         </p>
 
+        <label>Classroom images (optional, up to six)
+          <input type="file" accept="image/png,image/jpeg,image/webp" multiple disabled={processing}
+            onChange={event => setImages(Array.from(event.target.files || []))} />
+        </label>
         <div className="form-grid" style={{ marginBottom: 16 }}>
           <div className="form-row">
             <div className="form-group form-col">

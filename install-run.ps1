@@ -92,24 +92,12 @@ if ($UvCmd) {
 }
 Write-Host "[+] Dependencies installed." -ForegroundColor Green
 
-# 4. Check Local LLM Models
-Write-Host "[*] Checking on-device LLM model..." -ForegroundColor Yellow
-$LocalModels = @(Get-ChildItem -Path "models\llm\*.gguf" -ErrorAction SilentlyContinue)
-$UserModels = @(Get-ChildItem -Path "$env:USERPROFILE\.ila\models\llm\*.gguf" -ErrorAction SilentlyContinue)
-$ModelExists = ($LocalModels.Count -gt 0) -or ($UserModels.Count -gt 0)
-
-if ($ModelExists) {
-    Write-Host "[+] Offline LLM model found." -ForegroundColor Green
-} else {
-    Write-Host "[!] No offline LLM model detected." -ForegroundColor Yellow
-    Write-Host "[*] Downloading local Qwen 3.5 model (~532 MB) from Hugging Face..." -ForegroundColor Yellow
-    if ($UvCmd) {
-        & $UvCmd run ila download-llm --profile potato
-    } else {
-        & ".venv\Scripts\python.exe" -m ila.cli download-llm --profile potato
-    }
-    Write-Host "[+] Model ready." -ForegroundColor Green
-}
+# 4. Prepare the verified offline classroom components.
+& ".venv\Scripts\python.exe" scripts/setup_classroom.py
+if ($LASTEXITCODE -ne 0) { throw "Classroom model setup failed" }
+if (-not $env:ILA_ASR__MODEL_DIR) { $env:ILA_ASR__MODEL_DIR = Join-Path $PSScriptRoot ".ila/models" }
+& ".venv\Scripts\python.exe" -m ila download-model base.en
+if ($LASTEXITCODE -ne 0) { throw "Whisper setup failed" }
 
 # 5. Check Dashboard
 Write-Host "[*] Verifying Web Dashboard..." -ForegroundColor Yellow

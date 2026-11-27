@@ -103,6 +103,9 @@ export function getDemo(classLevel: number, subject: string): Promise<DemoLectur
 }
 
 export interface NotesRequest {
+  images?: string[];
+  image_observations?: string[];
+  text?: string;
   lines: DemoLine[];
   title: string;
   class_level: number;
@@ -110,6 +113,7 @@ export interface NotesRequest {
   profile: string;
   use_llm: boolean;
   use_syllabus?: boolean;
+  require_syllabus_match?: boolean;
 }
 
 export function createNotes(payload: NotesRequest): Promise<NotesResponse> {
@@ -231,6 +235,7 @@ export function transcribeFileStream(
 }
 
 export interface StudentTranscribeOptions {
+  images?: Blob[];
   subject?: string;
   profile?: string;
   useLlm?: boolean;
@@ -244,6 +249,7 @@ export function studentTranscribeFile(
 ): Promise<StudentTranscribeResponse> {
   const body = new FormData();
   body.append("file", file);
+  options.images?.forEach((image, i) => body.append("images", image, `image-${i + 1}.png`));
   body.append("subject", options.subject ?? "auto");
   body.append("profile", options.profile ?? "auto");
   body.append("use_llm", String(options.useLlm ?? true));
@@ -266,6 +272,7 @@ export function studentTranscribeFileStream(
 ): Promise<StudentTranscribeResponse> {
   const body = new FormData();
   body.append("file", file);
+  options.images?.forEach((image, i) => body.append("images", image, `image-${i + 1}.png`));
   body.append("subject", options.subject ?? "auto");
   body.append("profile", options.profile ?? "auto");
   body.append("use_llm", String(options.useLlm ?? true));

@@ -215,7 +215,6 @@ class FasterWhisperProvider:
         """Transcribe an uploaded audio/video file on CPU in parallel VAD batches."""
         from faster_whisper import BatchedInferencePipeline
         from ila.audio import decode_audio
-        from ila.text import normalize_transcript
 
         samples = decode_audio(path, sample_rate=16_000)
         duration_s = float(samples.size) / 16_000.0
@@ -241,7 +240,7 @@ class FasterWhisperProvider:
 
         lines: list[tuple[str, float, float]] = []
         for segment in segments:
-            text = normalize_transcript(segment.text)
+            text = segment.text.strip()
             if not text:
                 continue
             no_speech = float(getattr(segment, "no_speech_prob", 0.0))
