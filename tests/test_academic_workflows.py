@@ -218,3 +218,93 @@ def test_student_password_change_workflow(clean_store: Storage,school_session) -
     )
     assert new_login.status_code == 200
     assert "token" in new_login.json()
+
+@pytest.mark.parametrize("action", ["reply", "publish", "both"])
+def test_doubt_workflow(clean_store, school_session, action):
+    student, peer, teacher, other_teacher, outside = [TestClient(app) for _ in range(5)]
+    for session, role, identifier in [
+        (student, "student", "Student1"), (peer, "student", "Student2"),
+        (teacher, "teacher", "Teacher1"), (other_teacher, "teacher", "Teacher2"),
+        (outside, "student", "Student9"),
+    ]:
+        if session is outside:
+            clean_store.create_user(full_name=identifier, role=role, student_identifier=identifier,
+                                    password_hash="unused", class_level=9)
+        school_session(session, clean_store, role, identifier)
+    recipient = next(t for t in student.get("/api/student/doubt-teachers").json()
+                     if t["full_name"] == "Teacher1" and t["subject"] == "science")
+    payload = {"teacher_id": recipient["id"], "subject": "science", "chapter_number": 1,
+               "question": "Original doubt"}
+    assert outside.post("/api/student/doubts", json=payload).status_code == 422
+    sent = student.post("/api/student/doubts", json=payload)
+    assert sent.status_code == 200, sent.text
+    doubt_id = sent.json()["id"]
+    path = f"/api/teacher/doubts/{doubt_id}/response"
+    response = {"action": action, "question": "Public question", "answer": "Public answer",
+                "reply": "For the student only"}
+    assert teacher.get("/api/teacher/doubts?status=Pending").json()[0]["id"] == doubt_id
+    assert peer.get("/api/student/doubts").json() == []
+    assert other_teacher.get("/api/teacher/doubts").json() == []
+    assert other_teacher.post(path, json=response).status_code == 404
+    assert student.post(path, json=response).status_code == 403
+    result = teacher.post(path, json=response)
+    assert result.status_code == 200, result.text
+    received = student.get("/api/student/doubts").json()[0]
+    replied = action in ("reply", "both")
+    assert received["reply"] == (response["reply"] if replied else None)
+    assert bool(student.get("/api/student/notifications").json()) == replied
+    public = peer.get("/api/student/faqs?subject=science").json()
+    assert outside.get("/api/student/faqs").json() == []
+    assert peer.get("/api/student/faqs?subject=maths").json() == []
+    def subject_card():
+        return next(s for s in peer.get("/api/student/subjects").json() if s["subject_code"] == "science")
+
+    card = subject_card()
+    assert card["faq_count"] == len(public) == len(card["faqs"])
+    assert card["published_lecture_count"] == 0
+    if action == "reply":
+        assert public == []
+        return
+    assert len(public) == 1 and public[0]["doubt_id"] == doubt_id
+    assert public[0]["answer"] == "Public answer"
+    assert "reply" not in public[0] and "student_id" not in public[0]
+    assert teacher.post(path, json={**response, "reply": "retry"}).status_code == 409
+    assert student.get("/api/student/doubts").json()[0]["reply"] == received["reply"]
+    assert teacher.post(path, json={**response, "action": "edit", "answer": "Updated"}).is_success
+    assert student.get("/api/student/faqs").json()[0]["answer"] == "Updated"
+    assert teacher.post(path, json={"action": "unpublish"}).is_success
+    assert peer.get("/api/student/faqs").json() == []
+    assert subject_card()["faq_count"] == 0
+
+@pytest.mark.parametrize("action", ["reply", "both"])
+def test_doubt_inbox_and_locked_answer(clean_store, school_session, action):
+    student, teacher, other = [TestClient(app) for _ in range(3)]
+    school_session(student, clean_store, "student", "Pupil")
+    school_session(teacher, clean_store, "teacher", "Faculty")
+    school_session(other, clean_store, "teacher", "Other")
+    teacher_id = clean_store.get_user_by_identifier_and_role("Faculty", "teacher")["id"]
+    sent = student.post("/api/student/doubts", json={
+        "teacher_id": teacher_id, "subject": "science", "chapter_number": 1, "question": "Why?"})
+    assert sent.is_success
+    doubt_id = sent.json()["id"]
+    inbox = "/api/teacher/doubt-notifications"
+    path = "/api/teacher/doubts/" + doubt_id
+    notices = teacher.get(inbox).json()
+    assert [(n["id"], n["is_read"]) for n in notices] == [(doubt_id, 0)]
+    assert notices[0]["link"] == "/teacher/doubts/" + doubt_id
+    assert other.get(inbox).json() == []
+    assert other.post(path + "/view").status_code == 404
+    for _ in range(2):
+        assert teacher.post(path + "/view").is_success
+    assert [n["is_read"] for n in teacher.get(inbox).json()] == [1]
+    assert teacher.post(path + "/response", json={"action": action, "reply": "Because."}).is_success
+    for duplicate in ("reply", "both"):
+        assert teacher.post(path + "/response", json={"action": duplicate, "reply": "Changed"}).status_code == 409
+    doubt = student.get("/api/student/doubts").json()[0]
+    assert doubt["reply"] == "Because."
+    assert doubt["status"] == ("Replied" if action == "reply" else "Replied & Published")
+    assert len(student.get("/api/student/notifications").json()) == 1
+    card = next(s for s in student.get("/api/student/subjects").json() if s["subject_code"] == "science")
+    assert card["faq_count"] == (1 if action == "both" else 0)
+    if action == "both":
+        assert [(f["question"], f["answer"]) for f in card["faqs"]] == [("Why?", "Because.")]

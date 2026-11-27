@@ -227,6 +227,31 @@ CREATE TABLE IF NOT EXISTS lesson_completions (
     PRIMARY KEY (student_id, lesson_id)
 );
 
+CREATE TABLE IF NOT EXISTS student_doubts (
+    id TEXT PRIMARY KEY,
+    student_id TEXT NOT NULL REFERENCES users(id),
+    teacher_id TEXT NOT NULL REFERENCES users(id),
+    class_level INTEGER NOT NULL,
+    section TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    chapter_number INTEGER NOT NULL,
+    chapter TEXT NOT NULL,
+    question TEXT NOT NULL,
+    reply TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS doubt_faqs (
+    doubt_id TEXT PRIMARY KEY REFERENCES student_doubts(id),
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    published_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    published INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_doubts_teacher ON student_doubts(teacher_id,class_level,section,subject);
+CREATE INDEX IF NOT EXISTS idx_doubts_student ON student_doubts(student_id);
+
 CREATE TABLE IF NOT EXISTS notifications (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -2687,6 +2712,13 @@ class Storage:
                 (student_id, class_level, student_id),
             ).fetchall()
 
+            published_faqs = self.list_faqs(student_id)
+            published_counts: dict[str, int] = {}
+            for row in lessons:
+                if row["status"] == "published":
+                    code = row["subject"].strip().lower()
+                    published_counts[code] = published_counts.get(code, 0) + 1
+
             # Group lessons by subject and chapter
             lessons_by_sub_ch: dict[tuple[str, int], list[dict[str, Any]]] = {}
             for r in lessons:
@@ -2732,7 +2764,11 @@ class Storage:
 
                 total_sub_lessons = sum(len(ch["lessons"]) for ch in chapters_list)
                 total_completed = sum(ch["completed_count"] for ch in chapters_list)
+                subject_faqs = [faq for faq in published_faqs if faq["subject"] == sub_code]
                 tree.append({
+                    "published_lecture_count": published_counts.get(sub_code, 0),
+                    "faq_count": len(subject_faqs),
+                    "faqs": subject_faqs,
                     "subject_code": sub_code,
                     "subject_name": subj["name"],
                     "icon": subj.get("icon", "book"),
@@ -2742,6 +2778,124 @@ class Storage:
                     "chapters": chapters_list,
                 })
             return tree
+
+    _assigned_doubt = """EXISTS (SELECT 1 FROM teacher_class_assignments a
+        WHERE a.teacher_id=d.teacher_id AND a.class_level=d.class_level
+        AND a.section=d.section AND a.subject=d.subject)"""
+
+    def doubt_teachers(self, student_id):
+        with self._connection() as conn:
+            return [dict(row) for row in conn.execute("""
+                SELECT DISTINCT a.subject, u.id, u.full_name FROM student_enrollments e
+                JOIN teacher_class_assignments a USING(class_level, section)
+                JOIN users u ON u.id=a.teacher_id AND u.is_active
+                WHERE e.student_id=? ORDER BY a.subject,u.full_name
+            """, (student_id,))]
+
+    def submit_doubt(self, student_id, teacher_id, subject, chapter_number, question):
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            scope = conn.execute("""
+                SELECT e.class_level, e.section FROM student_enrollments e
+                JOIN teacher_class_assignments a USING(class_level, section)
+                JOIN users u ON u.id=a.teacher_id AND u.is_active
+                WHERE e.student_id=? AND a.teacher_id=? AND a.subject=?
+            """, (student_id, teacher_id, subject)).fetchone()
+            if not scope:
+                raise ValueError("Choose an assigned teacher for this subject.")
+            chapters = self.get_chapters(scope["class_level"], subject)
+            chapter = next((c for c in chapters if c["chapter_number"] == chapter_number), None)
+            if not chapter:
+                raise ValueError("Choose a chapter from this subject.")
+            doubt_id = uuid4().hex
+            conn.execute("""INSERT INTO student_doubts
+                (id,student_id,teacher_id,class_level,section,subject,chapter_number,chapter,question)
+                VALUES (?,?,?,?,?,?,?,?,?)""",
+                (doubt_id, student_id, teacher_id, *scope, subject, chapter_number, chapter["title"], question))
+            conn.execute("""INSERT INTO notifications
+                (id,user_id,title,message,type,link,created_at)
+                VALUES (?,?,'New student doubt',?,'student_doubt',?,CURRENT_TIMESTAMP)""",
+                (doubt_id, teacher_id, chapter["title"], f"/teacher/doubts/{doubt_id}"))
+            return doubt_id
+
+    def teacher_doubt_notifications(self, teacher_id):
+        with self._connection() as conn:
+            return [dict(row) for row in conn.execute(f"""
+                SELECT n.*, u.full_name AS student_name
+                FROM notifications n JOIN student_doubts d ON d.id=n.id
+                JOIN main.users u ON u.id=d.student_id
+                WHERE n.type='student_doubt' AND n.user_id=? AND d.teacher_id=n.user_id
+                  AND {self._assigned_doubt}
+                ORDER BY n.created_at DESC,n.rowid DESC""", (teacher_id,))]
+
+    def view_doubt(self, teacher_id, doubt_id):
+        with self._connection() as conn:
+            conn.execute(f"""UPDATE notifications SET is_read=1
+                WHERE id=? AND user_id=? AND type='student_doubt' AND EXISTS (
+                SELECT 1 FROM student_doubts d WHERE d.id=notifications.id
+                AND d.teacher_id=notifications.user_id AND {self._assigned_doubt})""",
+                (doubt_id, teacher_id))
+            return conn.execute("SELECT changes()").fetchone()[0] > 0
+
+    def list_doubts(self, user_id, teacher=False, filters=None):
+        scope = "d.student_id=?" if not teacher else "d.teacher_id=? AND " + self._assigned_doubt
+        with self._connection() as conn:
+            rows = conn.execute(f"""
+                SELECT d.*, u.full_name AS student_name, t.full_name AS teacher_name,
+                    CASE WHEN f.published=1 AND d.reply IS NOT NULL THEN 'Replied & Published'
+                         WHEN f.published=1 THEN 'Published' WHEN d.reply IS NOT NULL THEN 'Replied'
+                         ELSE 'Pending' END AS status
+                FROM student_doubts d JOIN main.users u ON u.id=d.student_id
+                JOIN main.users t ON t.id=d.teacher_id
+                LEFT JOIN doubt_faqs f ON f.doubt_id=d.id WHERE {scope}
+                ORDER BY d.created_at DESC,d.rowid DESC""", (user_id,))
+            return [dict(r) for r in rows if all(v is None or r[k] == v for k,v in (filters or {}).items())]
+
+    def list_faqs(self, user_id, teacher=False, subject=None):
+        scope = ("d.teacher_id=? AND " + self._assigned_doubt if teacher else
+                 """EXISTS (SELECT 1 FROM student_enrollments e JOIN subjects s USING(class_level)
+                    WHERE e.student_id=? AND e.class_level=d.class_level AND e.section=d.section
+                    AND s.code=d.subject)""")
+        with self._connection() as conn:
+            return [dict(row) for row in conn.execute(f"""
+                SELECT f.doubt_id,f.question,f.answer,f.published_at,d.subject,d.chapter,
+                       d.class_level,d.section,u.full_name AS teacher_name
+                FROM doubt_faqs f JOIN student_doubts d ON d.id=f.doubt_id
+                JOIN main.users u ON u.id=d.teacher_id WHERE f.published=1 AND {scope}
+                AND (? IS NULL OR d.subject=?) ORDER BY f.published_at DESC
+            """, (user_id, subject, subject))]
+
+    def respond_to_doubt(self, teacher_id, doubt_id, action, reply=None, question=None, answer=None):
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            doubt = conn.execute(f"""SELECT d.* FROM student_doubts d WHERE d.id=?
+                AND d.teacher_id=? AND {self._assigned_doubt}""", (doubt_id, teacher_id)).fetchone()
+            if not doubt:
+                raise KeyError(doubt_id)
+            if action in ("reply", "both", "publish") and doubt["reply"] is not None:
+                raise ValueError("This doubt already has a reply.")
+            if action == "both" and not question and not answer:
+                question, answer = doubt["question"], reply
+            if action in ("edit", "unpublish"):
+                existing = conn.execute("SELECT published FROM doubt_faqs WHERE doubt_id=?", (doubt_id,)).fetchone()
+                if not existing or not existing["published"]:
+                    raise KeyError(doubt_id)
+            if action in ("publish", "both"):
+                conn.execute("""INSERT INTO doubt_faqs(doubt_id,question,answer) VALUES (?,?,?)
+                    ON CONFLICT(doubt_id) DO UPDATE SET question=excluded.question,answer=excluded.answer,
+                    published=1,published_at=CURRENT_TIMESTAMP WHERE published=0""", (doubt_id,question,answer))
+                if not conn.execute("SELECT changes()").fetchone()[0]:
+                    raise ValueError("This FAQ is already published.")
+            elif action == "edit":
+                conn.execute("UPDATE doubt_faqs SET question=?,answer=? WHERE doubt_id=?", (question,answer,doubt_id))
+            elif action == "unpublish":
+                conn.execute("UPDATE doubt_faqs SET published=0 WHERE doubt_id=?", (doubt_id,))
+            if action in ("reply", "both") and doubt["reply"] != reply:
+                conn.execute("UPDATE student_doubts SET reply=? WHERE id=?", (reply,doubt_id))
+                conn.execute("""INSERT INTO notifications(id,user_id,title,message,type,link,created_at)
+                    VALUES (?,?,'Teacher replied','Your doubt has a new reply.','system','/student/ask',CURRENT_TIMESTAMP)""",
+                    (uuid4().hex,doubt["student_id"]))
+            return dict(doubt)
 
     # ---------------------------------------------------------------- notifications
     def get_user_notifications(self, user_id: str, unread_only: bool = False) -> list[dict[str, Any]]:

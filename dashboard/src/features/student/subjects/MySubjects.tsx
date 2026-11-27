@@ -8,14 +8,12 @@ import {
   CheckCircleIcon,
   CalendarIcon,
   FileTextIcon,
-  MicIcon,
   WarningIcon,
 } from "../../../components/icons";
 
 interface MySubjectsProps {
   user: AuthUser;
   onSelectLesson: (lessonId: string) => void;
-  onNavigateTranscribe?: () => void;
 }
 
 function SubjectIcon({ name }: { name: string }) {
@@ -32,12 +30,12 @@ function SubjectIcon({ name }: { name: string }) {
   return <BookIcon width={28} height={28} />;
 }
 
-export function MySubjects({ user, onSelectLesson, onNavigateTranscribe }: MySubjectsProps) {
+export function MySubjects({ user, onSelectLesson }: MySubjectsProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [subjectsTree, setSubjectsTree] = useState<SubjectTree[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
-  const [activeContentTab, setActiveContentTab] = useState<"lectures" | "materials">("lectures");
+  const [activeContentTab, setActiveContentTab] = useState<"lectures" | "faq">("lectures");
 
   useEffect(() => {
     let isMounted = true;
@@ -63,7 +61,7 @@ export function MySubjects({ user, onSelectLesson, onNavigateTranscribe }: MySub
     };
     loadTree(false);
     const unsub = subscribeRealtime(
-      ["lesson_published", "lesson_updated", "lesson_archived", "student_lesson_created", "student_activity"],
+      ["faq_updated", "lesson_published", "lesson_updated", "lesson_archived", "student_lesson_created", "student_activity"],
       () => loadTree(true),
     );
     return () => {
@@ -76,8 +74,6 @@ export function MySubjects({ user, onSelectLesson, onNavigateTranscribe }: MySub
   const lessons = useMemo(() => activeSubject?.chapters.flatMap((chapter) =>
     chapter.lessons.map((lesson) => ({ lesson, chapterTitle: chapter.title })),
   ) || [], [activeSubject]);
-  const materialLessons = lessons.filter(({ lesson }) => lesson.has_notes);
-
   if (loading) {
     return <div className="portal-loading-state"><div className="spinner" /><p>Loading your subjects...</p></div>;
   }
@@ -101,11 +97,6 @@ export function MySubjects({ user, onSelectLesson, onNavigateTranscribe }: MySub
             Class {user.class_level}{user.section || "A"} · Class, section, subject, chapter, and lesson.
           </p>
         </div>
-        {onNavigateTranscribe && (
-          <button type="button" className="btn btn-primary btn-sm" onClick={onNavigateTranscribe}>
-            <MicIcon width={14} height={14} /> Generate Notes from Audio
-          </button>
-        )}
       </header>
 
       <div className="subject-selector-strip" role="tablist" aria-label="Subjects">
@@ -123,7 +114,8 @@ export function MySubjects({ user, onSelectLesson, onNavigateTranscribe }: MySub
           >
             <SubjectIcon name={subject.subject_name} />
             <strong>{subject.subject_name}</strong>
-            <span className="chip-badge">{subject.total_lessons} Published Lectures</span>
+            <span className="chip-badge">{subject.published_lecture_count} Published Lectures</span>
+            <span className="chip-badge">{subject.faq_count} FAQs</span>
           </button>
         ))}
       </div>
@@ -145,10 +137,10 @@ export function MySubjects({ user, onSelectLesson, onNavigateTranscribe }: MySub
 
           <div className="student-subject-tabs" role="tablist" aria-label={`${activeSubject.subject_name} content`}>
             <button type="button" role="tab" aria-selected={activeContentTab === "lectures"} className={activeContentTab === "lectures" ? "active" : ""} onClick={() => setActiveContentTab("lectures")}>
-              <span className="student-tab-play">▶</span> Published Lectures ({activeSubject.total_lessons})
+              <span className="student-tab-play">▶</span> Published Lectures ({activeSubject.published_lecture_count})
             </button>
-            <button type="button" role="tab" aria-selected={activeContentTab === "materials"} className={activeContentTab === "materials" ? "active" : ""} onClick={() => setActiveContentTab("materials")}>
-              <BookIcon width={16} height={16} /> Study Material
+            <button type="button" role="tab" aria-selected={activeContentTab === "faq"} className={activeContentTab === "faq" ? "active" : ""} onClick={() => setActiveContentTab("faq")}>
+              <BookIcon width={16} height={16} /> FAQ ({activeSubject.faq_count})
             </button>
           </div>
 
@@ -177,14 +169,13 @@ export function MySubjects({ user, onSelectLesson, onNavigateTranscribe }: MySub
             </div>
           ) : (
             <div className="student-study-material-list">
-              {materialLessons.length === 0 ? (
-                <div className="empty-state-card"><BookIcon width={28} height={28} /><p>Published study notes will appear here.</p></div>
-              ) : materialLessons.map(({ lesson, chapterTitle }) => (
-                <article className="student-material-card" key={lesson.id}>
-                  <FileTextIcon width={20} height={20} />
-                  <div><strong>{lesson.title}</strong><span>{chapterTitle} · {lesson.teaching_date}</span></div>
-                  <button type="button" className="btn btn-outline btn-sm" onClick={() => onSelectLesson(lesson.id)}>Open notes</button>
-                </article>
+              {activeSubject.faq_count === 0 ? (
+                <div className="empty-state-card"><p>No FAQs published for this subject yet.</p></div>
+              ) : activeSubject.faqs.map(f => (
+                <details className="doubt-card" key={f.doubt_id}>
+                  <summary>{f.question}</summary><p>{f.answer}</p>
+                  <small>{f.chapter} · {f.teacher_name} · {f.published_at}</small>
+                </details>
               ))}
             </div>
           )}

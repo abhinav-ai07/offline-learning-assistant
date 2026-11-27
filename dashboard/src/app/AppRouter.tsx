@@ -1,3 +1,5 @@
+import { useDoubtNotifications } from "../features/useDoubtNotifications";
+import { StudentDoubts, TeacherDoubts } from "../features/Doubts";
 
 import { Administration, PortalLogin } from "../School";
 import { useCallback, useEffect, useState } from "react";
@@ -59,6 +61,8 @@ export function AppRouter() {
   };
 
   // Browser history synchronization
+  const doubtInbox = useDoubtNotifications(user?.role === "teacher" ? user.id : undefined);
+  const [openRequest, setOpenRequest] = useState(0);
   const navigateTo = useCallback((path: string) => {
     if (window.location.pathname !== path) {
       window.history.pushState(null, "", path);
@@ -131,6 +135,7 @@ export function AppRouter() {
     } else {
       if (currentPath.includes("/teacher/classes")) setTeacherSection("classes");
       else if (currentPath.includes("/teacher/studio")) setTeacherSection("studio");
+      else if (currentPath.includes("/teacher/doubts")) setTeacherSection("doubts");
       else if (currentPath.includes("/teacher/library")) setTeacherSection("library");
       else if (currentPath.includes("/teacher/activity")) setTeacherSection("activity");
       else if (currentPath.includes("/teacher/settings")) setTeacherSection("settings");
@@ -318,10 +323,6 @@ export function AppRouter() {
               <MySubjects
                 user={user}
                 onSelectLesson={(lessonId) => setActiveLessonId(lessonId)}
-                onNavigateTranscribe={() => {
-                  setStudentSection("transcribe");
-                  navigateTo("/student/transcribe");
-                }}
               />
             )
           )}
@@ -343,7 +344,10 @@ export function AppRouter() {
           )}
 
           {studentSection === "ask" && (
-            <AskIlaView user={user} initialLesson={askContextLesson} />
+            <div className="student-doubt-center">
+              <AskIlaView user={user} initialLesson={askContextLesson} />
+              <StudentDoubts />
+            </div>
           )}
 
           {studentSection === "builder" && (
@@ -378,6 +382,8 @@ export function AppRouter() {
     teacherBreadcrumbItems.push({ label: "My Classes", active: true });
   } else if (teacherSection === "studio") {
     teacherBreadcrumbItems.push({ label: "Lesson Studio", active: true });
+  } else if (teacherSection === "doubts") {
+    teacherBreadcrumbItems.push({ label: "Doubts & FAQs", active: true });
   } else if (teacherSection === "library") {
     teacherBreadcrumbItems.push({ label: "Lesson Library", active: true });
   } else if (teacherSection === "activity") {
@@ -392,6 +398,8 @@ export function AppRouter() {
     <ErrorBoundary fallbackTitle="Teacher Portal encountered an error">
       <TeacherLayout
         user={user}
+        notifications={doubtInbox.items}
+        onOpenDoubt={id => { navigateTo("/teacher/doubts/" + id); setOpenRequest(v => v + 1); }}
         currentSection={teacherSection}
         onNavigate={(sec) => {
           setEditLesson(undefined);
@@ -429,6 +437,7 @@ export function AppRouter() {
           />
         )}
 
+        {teacherSection === "doubts" && <TeacherDoubts key={currentPath + openRequest} target={currentPath.split("/")[3]} notifications={doubtInbox.items} onView={doubtInbox.markRead} />}
         {teacherSection === "classes" && (
           <MyClasses
             user={user}

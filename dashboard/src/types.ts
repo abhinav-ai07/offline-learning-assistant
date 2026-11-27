@@ -664,7 +664,22 @@ export interface ChapterTreeItem {
   lessons: LessonSummary[];
 }
 
+export interface FAQ {
+  doubt_id: string;
+  subject: string;
+  class_level: number;
+  section: string;
+  chapter: string;
+  question: string;
+  answer: string;
+  teacher_name: string;
+  published_at: string;
+}
+
 export interface SubjectTree {
+  published_lecture_count: number;
+  faq_count: number;
+  faqs: FAQ[];
   subject_code: string;
   subject_name: string;
   icon: string;

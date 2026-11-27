@@ -2495,6 +2495,91 @@ def student_mark_lesson_complete(
     return completion
 
 
+class SubmitDoubt(BaseModel):
+    subject: str
+    chapter_number: int
+    teacher_id: str
+    question: str = Field(max_length=8000)
+
+
+class DoubtResponse(BaseModel):
+    action: Literal["reply", "publish", "both", "edit", "unpublish"]
+    reply: str = Field(default="", max_length=16000)
+    question: str = Field(default="", max_length=8000)
+    answer: str = Field(default="", max_length=16000)
+
+
+@app.get("/api/student/doubt-teachers")
+def doubt_teachers(user: Annotated[dict, Depends(require_student)]):
+    return _store().doubt_teachers(user["id"])
+
+
+@app.get("/api/student/doubts")
+def student_doubts(user: Annotated[dict, Depends(require_student)]):
+    return _store().list_doubts(user["id"])
+
+
+@app.post("/api/student/doubts")
+def submit_doubt(body: SubmitDoubt, user: Annotated[dict, Depends(require_student)]):
+    if not body.question.strip():
+        raise HTTPException(422, "Enter a question.")
+    try:
+        doubt_id = _store().submit_doubt(user["id"], body.teacher_id, body.subject,
+                                          body.chapter_number, body.question.strip())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    _emit_realtime_event("doubt_updated", target_user_id=body.teacher_id)
+    return {"id": doubt_id}
+
+
+@app.get("/api/teacher/doubt-notifications")
+def teacher_doubt_notifications(user: Annotated[dict, Depends(require_teacher)]):
+    return _store().teacher_doubt_notifications(user["id"])
+
+
+@app.post("/api/teacher/doubts/{doubt_id}/view")
+def view_doubt(doubt_id: str, user: Annotated[dict, Depends(require_teacher)]):
+    if not _store().view_doubt(user["id"], doubt_id):
+        raise HTTPException(404, "Notification unavailable.")
+    return {"status": "ok"}
+
+
+@app.get("/api/teacher/doubts")
+def teacher_doubts(user: Annotated[dict, Depends(require_teacher)], class_level: int | None = None,
+                   subject: str | None = None, chapter: str | None = None, status: str | None = None):
+    return _store().list_doubts(user["id"], teacher=True, filters={
+        "class_level": class_level, "subject": subject, "chapter": chapter, "status": status})
+
+
+@app.get("/api/student/faqs")
+def student_faqs(user: Annotated[dict, Depends(require_student)], subject: str | None = None):
+    return _store().list_faqs(user["id"], subject=subject)
+
+
+@app.get("/api/teacher/faqs")
+def teacher_faqs(user: Annotated[dict, Depends(require_teacher)]):
+    return _store().list_faqs(user["id"], teacher=True)
+
+
+@app.post("/api/teacher/doubts/{doubt_id}/response")
+def respond_to_doubt(doubt_id: str, body: DoubtResponse, user: Annotated[dict, Depends(require_teacher)]):
+    reply, question, answer = body.reply.strip(), body.question.strip(), body.answer.strip()
+    if body.action in ("reply", "both") and not reply:
+        raise HTTPException(422, "Enter a private reply.")
+    if (body.action in ("publish", "edit") or (body.action == "both" and (question or answer))) and not (question and answer):
+        raise HTTPException(422, "Enter the public question and answer.")
+    try:
+        doubt = _store().respond_to_doubt(user["id"], doubt_id, body.action, reply, question, answer)
+    except KeyError as exc:
+        raise HTTPException(404, "Doubt or FAQ unavailable.") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    _emit_realtime_event("doubt_updated", target_user_id=doubt["student_id"])
+    if body.action != "reply":
+        _emit_realtime_event("faq_updated", class_level=doubt["class_level"], roles=("student",))
+    return {"status": "ok"}
+
+
 @app.get("/api/student/notifications")
 def student_notifications(
     current_user: Annotated[dict[str, Any], Depends(require_student)],

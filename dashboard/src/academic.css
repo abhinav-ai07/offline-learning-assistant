@@ -868,3 +868,304 @@ html,body,#root {height:auto;min-height:100%;overflow:visible}
   [data-portal="student"] .builder-page-heading {min-height:0}
   [data-portal="student"] .builder-illustration {display:none}
 }
+
+.doubt-form, .doubt-form label, .doubt-filters label { display: grid; gap: .5rem; }
+.doubt-form { gap: 1rem; }
+.doubt-filters { display: flex; flex-wrap: wrap; gap: 1rem; margin-block: 1rem; }
+.doubt-form textarea { min-height: 5rem; resize: vertical; }
+.doubt-card { display: block; text-align: left; padding: 1rem; margin-block: .75rem; border: 1px solid var(--border, #ccdcd4); border-radius: 12px; }
+.doubt-card p, .doubt-card summary { white-space: pre-wrap; overflow-wrap: anywhere; }
+.doubt-card summary { cursor: pointer; font-weight: 600; }
+.doubt-card button { margin: .25rem; }
+
+.teacher-doubt-card { display: grid; gap: .85rem; margin-block: 1.25rem; padding: 1.25rem; }
+.teacher-doubt-card header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.teacher-doubt-card :is(h3,p) { margin: 0; }
+.teacher-doubt-card label { display: grid; gap: .4rem; }
+.teacher-doubt-card textarea { min-height: 5rem; resize: vertical; }
+.teacher-doubt-card .chip-badge, .doubt-unread { background: #d8f4e7; color: #174b41; border-radius: 1rem; padding: .2rem .6rem; }
+.doubt-unread { margin-left: auto; font-weight: 700; }
+
+[data-portal="student"] .student-doubt-center {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 20px 24px;
+  width: 100%;
+  max-width: 1260px;
+  margin: 0 auto;
+}
+[data-portal="student"] .student-doubt-center .ask-ila-workspace {
+  display: contents;
+}
+[data-portal="student"] .student-doubt-center .ask-page-header {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 0;
+}
+[data-portal="student"] .ask-page-heading h2 {
+  font: 700 2rem/1.16 Georgia, "Times New Roman", serif;
+  letter-spacing: -.035em;
+}
+[data-portal="student"] .ask-ila-card,
+[data-portal="student"] .student-teacher-card,
+[data-portal="student"] .student-doubt-history {
+  min-width: 0;
+  overflow: visible;
+  border: 1px solid #d5e7dc;
+  border-radius: 14px;
+  background: var(--bg-surface);
+  box-shadow: 0 2px 6px rgba(20, 59, 43, .04);
+}
+[data-portal="student"] .ask-ila-card {
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0 18px 18px;
+}
+[data-portal="student"] .ask-ila-card-heading,
+[data-portal="student"] .student-doubt-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 64px;
+  margin: 0 -18px;
+  padding: 12px 18px;
+  border-radius: 13px 13px 0 0;
+  background: linear-gradient(105deg, #edf7f0, #f8fbf8);
+}
+[data-portal="student"] .ask-ila-card-icon,
+[data-portal="student"] .student-doubt-card-icon {
+  display: grid;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff;
+  color: #07835d;
+}
+[data-portal="student"] .ask-ila-card-heading h2,
+[data-portal="student"] .student-doubt-card-heading h2,
+[data-portal="student"] .student-doubt-history-heading h2 {
+  margin: 0 0 2px;
+  color: var(--text-primary);
+  font: 700 1.2rem/1.25 Georgia, "Times New Roman", serif;
+  letter-spacing: -.025em;
+}
+[data-portal="student"] .ask-ila-card-heading p,
+[data-portal="student"] .student-doubt-card-heading p,
+[data-portal="student"] .student-doubt-history-heading p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: .83rem;
+  line-height: 1.4;
+}
+[data-portal="student"] .ask-ila-card .ask-context-selectors {
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0;
+}
+[data-portal="student"] .ask-ila-card .ask-context-selectors select,
+[data-portal="student"] .student-teacher-card select {
+  min-height: 42px;
+  border-radius: 8px;
+}
+[data-portal="student"] .ask-ila-card .chat-messages-scroll-area {
+  min-height: 100px;
+  margin: 0;
+  padding: 12px;
+  border: 0;
+  border-radius: 10px;
+  background: #f0f7f2;
+}
+[data-portal="student"] .ask-ila-card .chat-bubble-content {
+  padding: 0;
+  background: transparent !important;
+}
+[data-portal="student"] .ask-ila-card .quick-prompts-bar {
+  gap: 7px;
+  margin: 0;
+}
+[data-portal="student"] .ask-ila-card .quick-prompts-bar .prompts-label {
+  font-size: .8rem;
+}
+[data-portal="student"] .ask-ila-card .quick-prompt-chip {
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: .72rem;
+}
+[data-portal="student"] .ask-ila-card .ask-input-form {
+  gap: 10px;
+}
+[data-portal="student"] .ask-ila-card .ask-input-form .chat-input {
+  height: 42px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  font-size: .82rem;
+}
+[data-portal="student"] .ask-ila-card .ask-input-form .btn-send {
+  min-width: 120px;
+  min-height: 42px;
+  border-radius: 8px;
+  font-size: .82rem;
+}
+[data-portal="student"] .student-teacher-card {
+  grid-column: 2;
+  padding: 0 18px 18px;
+}
+[data-portal="student"] .student-teacher-card .student-doubt-card-heading {
+  margin-bottom: 12px;
+}
+[data-portal="student"] .student-teacher-card .doubt-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 10px 14px;
+}
+[data-portal="student"] .student-teacher-card .doubt-form label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  font-size: .8rem;
+  font-weight: 700;
+}
+[data-portal="student"] .student-teacher-card .doubt-form label:nth-of-type(4),
+[data-portal="student"] .student-teacher-card .doubt-form .student-doubt-error,
+[data-portal="student"] .student-teacher-card .doubt-form button {
+  grid-column: 1 / -1;
+}
+[data-portal="student"] .student-teacher-card .doubt-form textarea {
+  min-height: 66px;
+  resize: vertical;
+  border-radius: 8px;
+  font-size: .82rem;
+}
+[data-portal="student"] .student-teacher-card .doubt-form button {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 8px;
+}
+[data-portal="student"] .student-doubt-error {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: .84rem;
+}
+[data-portal="student"] .student-doubt-history {
+  grid-column: 1 / -1;
+  padding: 16px 18px 18px;
+}
+[data-portal="student"] .student-doubt-history-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #07835d;
+}
+[data-portal="student"] .student-doubt-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+[data-portal="student"] .student-doubt-table {
+  display: table;
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+  font-size: .76rem;
+}
+[data-portal="student"] .student-doubt-table th {
+  padding: 8px 10px;
+  background: #eaf4ed;
+  color: #263c36;
+  font-size: .68rem;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+[data-portal="student"] .student-doubt-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #edf0ed;
+  vertical-align: middle;
+}
+[data-portal="student"] .student-doubt-table .student-doubt-question {
+  min-width: 220px;
+  max-width: 360px;
+  font-weight: 600;
+}
+[data-portal="student"] .student-doubt-subject,
+[data-portal="student"] .student-doubt-status {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #e7f4ed;
+  color: #17684d;
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-portal="student"] .student-doubt-status.is-pending {
+  background: #fff0dc;
+  color: #8d5015;
+}
+[data-portal="student"] .student-doubt-details { position: relative; }
+[data-portal="student"] .student-doubt-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: max-content;
+  margin: 0;
+  padding: 5px 9px;
+  cursor: pointer;
+  list-style: none;
+}
+[data-portal="student"] .student-doubt-details summary::-webkit-details-marker { display: none; }
+[data-portal="student"] .student-doubt-detail-content {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  width: min(320px, 80vw);
+  padding: 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  background: var(--bg-surface);
+  box-shadow: 0 8px 24px rgba(20, 59, 43, .16);
+  white-space: normal;
+}
+[data-portal="student"] .student-doubt-detail-content p { margin: 8px 0 0; }
+[data-portal="student"] .student-doubt-empty { margin: 8px 0; color: var(--text-secondary); }
+[data-theme="dark"] [data-portal="student"] :is(.ask-ila-card-heading, .student-doubt-card-heading) {
+  background: var(--bg-surface-subtle);
+}
+[data-theme="dark"] [data-portal="student"] .ask-ila-card .chat-messages-scroll-area {
+  background: var(--bg-surface-subtle);
+}
+
+@media(max-width:900px) {
+  [data-portal="student"] .student-doubt-center { grid-template-columns: minmax(0, 1fr); }
+  [data-portal="student"] .student-doubt-center :is(.ask-page-header,.ask-ila-card,.student-teacher-card,.student-doubt-history) {
+    grid-column: 1;
+  }
+}
+@media(max-width:600px) {
+  [data-portal="student"] .student-doubt-center { gap: 14px; }
+  [data-portal="student"] .ask-page-heading h2 { font-size: 1.65rem; }
+  [data-portal="student"] .ask-ila-card,
+  [data-portal="student"] .student-teacher-card,
+  [data-portal="student"] .student-doubt-history { padding-inline: 12px; }
+  [data-portal="student"] .ask-ila-card-heading,
+  [data-portal="student"] .student-doubt-card-heading { margin-inline: -12px; padding-inline: 12px; }
+  [data-portal="student"] .ask-ila-card .ask-context-selectors,
+  [data-portal="student"] .student-teacher-card .doubt-form { grid-template-columns: minmax(0, 1fr); }
+  [data-portal="student"] .student-teacher-card .doubt-form label,
+  [data-portal="student"] .student-teacher-card .doubt-form label:nth-of-type(4),
+  [data-portal="student"] .student-teacher-card .doubt-form .student-doubt-error,
+  [data-portal="student"] .student-teacher-card .doubt-form button { grid-column: 1; }
+  [data-portal="student"] .ask-ila-card .ask-input-form { flex-direction: column; }
+  [data-portal="student"] .ask-ila-card .ask-input-form .btn-send { align-self: stretch; }
+}

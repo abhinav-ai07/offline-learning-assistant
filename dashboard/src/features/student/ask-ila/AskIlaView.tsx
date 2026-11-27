@@ -166,6 +166,15 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
         </svg>
       </header>
 
+      <section className="ask-ila-card">
+        <header className="ask-ila-card-heading">
+          <span className="ask-ila-card-icon"><SparkIcon width={22} height={22} /></span>
+          <div>
+            <h2>Get Instant Help from ILA</h2>
+            <p>Ask doubts, get concept explanations, examples, or solutions using ILA.</p>
+          </div>
+        </header>
+
       {attachedLesson ? (
         <div className="attached-context-badge">
           <BookIcon width={14} height={14} />
@@ -320,6 +329,7 @@ export function AskIlaView({ user, initialLesson }: AskIlaViewProps) {
           Ask Question
         </button>
       </form>
+      </section>
     </div>
   );
 }
