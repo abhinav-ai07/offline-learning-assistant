@@ -2907,6 +2907,13 @@ class Storage:
             query += " ORDER BY created_at DESC LIMIT 30"
             return [dict(r) for r in conn.execute(query, params).fetchall()]
 
+    def clear_notifications(self, user_id: str, notification_id: str | None = None) -> None:
+        with self._connection() as conn:
+            if notification_id is None:
+                conn.execute("DELETE FROM notifications WHERE user_id=?", (user_id,))
+            else:
+                conn.execute("DELETE FROM notifications WHERE user_id=? AND id=?", (user_id, notification_id))
+
     def mark_notification_read(self, notification_id: str, user_id: str) -> bool:
         with self._connection() as conn:
             cursor = conn.execute(

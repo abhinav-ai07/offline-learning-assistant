@@ -308,3 +308,23 @@ def test_doubt_inbox_and_locked_answer(clean_store, school_session, action):
     assert card["faq_count"] == (1 if action == "both" else 0)
     if action == "both":
         assert [(f["question"], f["answer"]) for f in card["faqs"]] == [("Why?", "Because.")]
+
+
+def test_clear_notifications_only_affects_current_account(clean_store, school_session):
+    pupil, faculty = TestClient(app), TestClient(app)
+    school_session(pupil, clean_store, "student", "Pupil")
+    school_session(faculty, clean_store, "teacher", "Faculty")
+    student_id = clean_store.get_user_by_identifier_and_role("Pupil", "student")["id"]
+    teacher_id = clean_store.get_user_by_identifier_and_role("Faculty", "teacher")["id"]
+    notices = [clean_store.create_notification(student_id, "Lesson", "Published") for _ in range(2)]
+    doubt = clean_store.submit_doubt(student_id, teacher_id, "science", 1, "Why?")
+    assert faculty.delete("/api/notifications", params={"notification_id": notices[0]}).is_success
+    assert len(pupil.get("/api/student/notifications").json()) == 2
+    assert pupil.delete("/api/notifications", params={"notification_id": notices[0]}).is_success
+    assert [n["id"] for n in pupil.get("/api/student/notifications").json()] == notices[1:]
+    assert pupil.delete("/api/notifications").is_success
+    assert pupil.get("/api/student/notifications").json() == []
+    assert [n["id"] for n in faculty.get("/api/teacher/doubt-notifications").json()] == [doubt]
+    assert faculty.delete("/api/notifications").is_success
+    assert faculty.get("/api/teacher/doubt-notifications").json() == []
+    assert faculty.get("/api/teacher/doubts").json()[0]["id"] == doubt

@@ -1169,3 +1169,17 @@ html,body,#root {height:auto;min-height:100%;overflow:visible}
   [data-portal="student"] .ask-ila-card .ask-input-form { flex-direction: column; }
   [data-portal="student"] .ask-ila-card .ask-input-form .btn-send { align-self: stretch; }
 }
+
+.mast-tools .notification-panel { overflow: hidden; top: calc(100% + 8px); border-radius: 14px; }
+.notification-panel-header { gap: .7rem; }
+.notification-panel-header strong { margin-right: auto; }
+.notice-clear-all { background: transparent; color: var(--text-primary); border: 0; cursor: pointer; font: inherit; font-size: .82rem; text-decoration: underline; text-underline-offset: .2em; }
+.notice-row { display: flex; align-items: center; border-radius: 9px; padding-right: .3rem; }
+.notice-row + .notice-row { margin-top: .25rem; }
+.notice-row.unread { background: var(--bg-surface-subtle); }
+.notice-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; margin-top: .4rem; }
+.unread .notice-dot { background: #389678; }
+.notice-row .notification-item { min-width: 0; flex: 1; }
+.notice-row .notification-item-content { display: grid; gap: .15rem; overflow-wrap: anywhere; }
+.notification-list .notice-dismiss { width: auto; padding: .55rem; color: var(--text-secondary); }
+.notice-footer { border-top: 1px solid var(--border-subtle); padding: .65rem 1rem; }

@@ -268,6 +268,7 @@ export function AppRouter() {
             setStudentSection("subjects");
             navigateTo("/student/subjects");
           }}
+          onNotificationsCleared={id => setNotifications(list => id ? list.filter(n => n.id !== id) : [])}
           notifications={notifications}
           onRefreshNotifications={refreshNotifications}
           onLogout={handleLogout}
@@ -398,6 +399,7 @@ export function AppRouter() {
     <ErrorBoundary fallbackTitle="Teacher Portal encountered an error">
       <TeacherLayout
         user={user}
+        onNotificationsCleared={doubtInbox.remove}
         notifications={doubtInbox.items}
         onOpenDoubt={id => { navigateTo("/teacher/doubts/" + id); setOpenRequest(v => v + 1); }}
         currentSection={teacherSection}

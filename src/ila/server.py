@@ -2580,6 +2580,12 @@ def respond_to_doubt(doubt_id: str, body: DoubtResponse, user: Annotated[dict, D
     return {"status": "ok"}
 
 
+@app.delete("/api/notifications")
+def clear_notifications(user: Annotated[dict, Depends(get_current_user)], notification_id: str | None = None):
+    _store().clear_notifications(user["id"], notification_id)
+    return {"status": "ok"}
+
+
 @app.get("/api/student/notifications")
 def student_notifications(
     current_user: Annotated[dict[str, Any], Depends(require_student)],

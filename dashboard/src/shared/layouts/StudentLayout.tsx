@@ -1,3 +1,4 @@
+import { NotificationMenu } from "../components/NotificationMenu";
 import {PortalShell} from "../components/AcademicUI";
 import { AccountPassword } from "../../School";
 import React, { useEffect, useState } from "react";
@@ -5,20 +6,17 @@ import type { AppNotification, AuthUser } from "../../types";
 import { subscribeRealtime } from "../../realtime";
 import {
   BarChartIcon,
-  BellIcon,
   BookIcon,
   CheckCircleIcon,
   ChevronDownIcon,
   CpuIcon,
   GraduationCapIcon,
   HelpCircleIcon,
-  FileTextIcon,
   LogOutIcon,
   MoonIcon,
   SearchIcon,
   SunIcon,
   UserIcon,
-  XIcon,
 } from "../../components/icons";
 import { Breadcrumbs, type BreadcrumbItem } from "../components/Breadcrumbs";
 import { markNotificationRead } from "../../api";
@@ -31,6 +29,7 @@ interface StudentLayoutProps {
   onNavigate: (section: StudentNavSection) => void;
   breadcrumbs: BreadcrumbItem[];
   notifications: AppNotification[];
+  onNotificationsCleared: (id?: string) => void;
   onOpenLesson:(id:string)=>void;
   onRefreshNotifications: () => void;
   onLogout: () => void;
@@ -45,22 +44,19 @@ export function StudentLayout({
   onNavigate,
   breadcrumbs,
   notifications,
-  onRefreshNotifications,onOpenLesson,
+  onRefreshNotifications,onOpenLesson,onNotificationsCleared,
   onLogout,
   theme,
   onToggleTheme,
   children,
 }: StudentLayoutProps) {
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchText, setSearchText] = useState("");
 
-  const unreadCount = notifications.filter((n) => !n.is_read).length;
   const displayName = user.full_name.split(/\s+/).map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(" ");
 
   useEffect(() => {
     return subscribeRealtime(
-      ["lesson_published", "lesson_updated", "lesson_archived"],
+      ["lesson_published", "lesson_updated", "lesson_archived", "doubt_updated"],
       () => onRefreshNotifications(),
     );
   }, [onRefreshNotifications]);
@@ -77,15 +73,16 @@ export function StudentLayout({
     if (notif.link?.includes("subjects") || notif.link?.includes("lesson")) {
       const id = new URL(notif.link, window.location.origin).searchParams.get("lesson");
       if(id) onOpenLesson(id);else onNavigate("subjects");
+    } else if (notif.link === "/student/ask") {
+      onNavigate("ask");
     } else if (notif.link?.includes("quiz")) {
       onNavigate("practice");
     }
-    setShowNotifications(false);
   };
 
   return <PortalShell portal="Student" name={user.full_name} portalIcon={<GraduationCapIcon width={22} height={22}/>} active={currentSection} navigate={onNavigate}
-    items={[[ "overview","Overview"],["subjects","My Subjects"],["builder","Smart Study Builder"],["transcribe","Audio Transcripts"],["ask","Doubt & Question Center"],["practice","Practice & Assessment"],["progress","My Progress"]]}
-    renderNavItem={(key,label)=><><span className="student-nav-icon">{key==="overview"?<GraduationCapIcon/>:key==="subjects"?<BookIcon/>:key==="builder"?<CpuIcon/>:key==="transcribe"?<FileTextIcon/>:key==="ask"?<HelpCircleIcon/>:key==="practice"?<CheckCircleIcon/>:<BarChartIcon/>}</span><span>{label}</span></>}
+    items={[[ "overview","Overview"],["subjects","My Subjects"],["builder","Smart Study Builder"],["ask","Doubt & Question Center"],["practice","Practice & Assessment"],["progress","My Progress"]]}
+    renderNavItem={(key,label)=><><span className="student-nav-icon">{key==="overview"?<GraduationCapIcon/>:key==="subjects"?<BookIcon/>:key==="builder"?<CpuIcon/>:key==="ask"?<HelpCircleIcon/>:key==="practice"?<CheckCircleIcon/>:<BarChartIcon/>}</span><span>{label}</span></>}
     footer={<><AccountPassword logout={onLogout}/><button type="button" onClick={onLogout}><LogOutIcon width={16} height={16}/>Sign out</button></>}
     tools={<>
             {currentSection === "overview" && (
@@ -107,58 +104,8 @@ export function StudentLayout({
                 <kbd>Ctrl K</kbd>
               </label>
             )}
-            <div className="notification-dropdown-wrapper">
-              <button
-                type="button"
-                className={`header-icon-btn ${unreadCount > 0 ? "has-unread" : ""}`}
-                onClick={() => setShowNotifications(!showNotifications)}
-                aria-label="View notifications"
-                title="Notifications"
-              >
-                <BellIcon width={18} height={18} />
-                {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
-              </button>
-
-              {showNotifications && (
-                <div className="notification-panel">
-                  <div className="notification-panel-header">
-                    <h4>Classroom Notifications</h4>
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      onClick={() => setShowNotifications(false)}
-                      aria-label="Close notifications"
-                    >
-                      <XIcon width={14} height={14} />
-                    </button>
-                  </div>
-                  <div className="notification-list">
-                    {notifications.length === 0 ? (
-                      <div className="notification-empty">No notifications yet.</div>
-                    ) : (
-                      notifications.map((notif) => (
-                        <div
-                          key={notif.id}
-                          className={`notification-item ${!notif.is_read ? "unread" : ""}`}
-                          onClick={() => handleNotificationClick(notif)}
-                        >
-                          <div className="notification-item-icon">
-                            <BookIcon width={14} height={14} />
-                          </div>
-                          <div className="notification-item-content">
-                            <span className="notification-title">{notif.title}</span>
-                            <span className="notification-message">{notif.message}</span>
-                            <span className="notification-date">
-                              {new Date(notif.created_at).toLocaleDateString()}
-                            </span>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
+            <NotificationMenu items={notifications} onCleared={onNotificationsCleared}
+              onOpen={id => {const notice = notifications.find(n => n.id === id); if (notice) void handleNotificationClick(notice);}}/>
 
             {/* Theme Toggle */}
             <button

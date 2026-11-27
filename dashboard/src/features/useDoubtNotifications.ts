@@ -34,5 +34,6 @@ export function useDoubtNotifications(teacherId?: string) {
     await request("/api/teacher/doubts/" + id + "/view", {method: "POST"});
     setItems(list => list.map(n => n.id === id ? {...n, is_read: true} : n));
   }, []);
-  return {items, markRead};
+  const remove = (id?: string) => setItems(list => id ? list.filter(n => n.id !== id) : []);
+  return {items, markRead, remove};
 }
